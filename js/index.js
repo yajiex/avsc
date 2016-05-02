@@ -6,6 +6,7 @@
   var avsc = require('avsc'),
       buffer = require('buffer'),
       utils = require('./utils'),
+      meta = require('./meta'),
       $ = require('jquery');
   window.avsc = avsc;
   $( function() {
@@ -31,14 +32,17 @@
         typingTimer,
         eventObj = utils.eventObj,
         urlUtils = utils.urlUtils,
+        metaType = meta.metaType,
         doneTypingInterval = 500; // wait for some time before processing user input.
     
-    window.reverseIndexMap = [];  
+    window.reverseIndexMap = [];
+    window.metaType = metaType;
 
     eventObj.on('schema-changed', function(schemaJson) {
       template.hide();
       var schemaStr = JSON.stringify(schemaJson, null, 2); 
       runPreservingCursorPosition('schema', schemaElement.text, {context: schemaElement, param: schemaStr});
+      // encode schema here.
       eventObj.trigger('update-url', {schema:schemaStr});
       validateSchema(schemaJson);
     }).on('input-changed', function(rawInput) {
@@ -54,9 +58,9 @@
     }).on('output-changed', function(outputStr) {
       decode(outputStr);
     }).on('valid-schema', function() {
-      hideError(schemaErrorElement, schemaValidElement);
-      randomElement.removeClass('-disabled-');
+      hideError(schemaErrorElement, schemaValidElement, 'schema');
     }).on('invalid-schema', function (message) {
+      randomElement.fadeOut('slow');
       showError(schemaErrorElement, message);
     }).on('valid-input', function () { 
       hideError(inputErrorElement, decodedValidElement);
@@ -76,7 +80,7 @@
         });
       }
     }).on('reset-layout', function() {
-      randomElement.addClass('-disabled-');
+      $.clearQueue();
       firstPageElements.each(function(i, element) {
         $(element).removeClass('-hidden-');
       });
@@ -89,22 +93,25 @@
       hideError(schemaErrorElement);
       hideError(inputErrorElement);
       hideError(outputErrorElement);
+      randomElement.hide();
       template.show();
     }).on('schema-loaded', function(rawSchema) {
       template.hide();
-      var newUrl = urlUtils.updateValues(location.href, {'schema' : rawSchema});
-      // Use this so that it doesn't reload the page, but that also means that you need to manually
-      // load the schema from url
-      window.history.pushState({}, 'AVSC', newUrl);
+      eventObj.trigger('update-url', {'schema': rawSchema});
       populateFromQuery();
       eventObj.trigger('update-layout');
-      
     }).on('re-instrument', function(rawInput) {
       window.instrumented = instrumentObject(window.type, window.type.fromString(rawInput));
       window.reverseIndexMap = computeReverseIndex(window.instrumented);
     }).on('update-url', function(data) {
       var state = {};
       var newUrl = location.href;
+      if (data.schema) {
+        // encode schema here..
+        var jsonSchema = JSON.parse(data.schema);
+        var encodedSchema = metaType.toBuffer(jsonSchema);
+        data.schema = encodedSchema.toString('hex');
+      }
 
       newUrl = urlUtils.updateValues(newUrl, data);
       // Use this so that it doesn't reload the page, but that also means that you need to manually
@@ -281,7 +288,10 @@
     function populateFromQuery() {
       var s = urlUtils.readValue('schema');
       if(s) {
-        eventObj.trigger('schema-changed', JSON.parse(s));
+        // decode schema.
+        var encodedSchema = new Buffer(s, 'hex');
+        var decodedSchema = metaType.fromBuffer(encodedSchema);
+        eventObj.trigger('schema-changed', decodedSchema);
       }
       
       var record = urlUtils.readValue('record');
@@ -554,7 +564,7 @@
           }
           var attrs = JSON.parse(rawInput);
           // Throw more useful error if not valid.
-          window.type.isValid(attrs, {errorHook: 
+          window.type.isValid(attrs, {errorHook:
             function(path, any, type) {
               if (
                 typeof any == 'string' &&
@@ -582,7 +592,7 @@
     function validateSchema(schemaJson) {
       window.type = undefined;
       try {
-        window.type = avsc.parse(schemaJson);
+        window.type = avsc.parse(schemaJson, {wrapUnions: true});
         eventObj.trigger('valid-schema');
         eventObj.trigger('update-layout');
       } catch (err) {
@@ -645,11 +655,18 @@
       errorElem.show();
     };
 
-    function hideError(errorElem, validElem) {
+    function hideError(errorElem, validElem, elementName) {
       errorElem.text("");
       errorElem.hide();
       if (validElem) {
-        validElem.show('slow').delay(500).hide('slow');
+        if ("schema" === elementName) {
+          randomElement.hide();
+        }
+        validElem.fadeIn('slow').delay(500).fadeOut('slow', function () {
+          if ("schema" === elementName) {
+            randomElement.fadeIn('slow');
+          }
+        });
       }
     }
     
@@ -686,11 +703,12 @@
     }
 
     function instrument(schema) {
-      if (schema instanceof avsc.types.Type) {
+      if (schema instanceof avsc.Type) {
         schema = schema.getSchema();
       }
       var refs = [];
-      return avsc.parse(schema, {typeHook: hook});
+      return avsc.parse(schema, {typeHook: hook,
+                                 wrapUnions: true});
 
       function hook(schema, opts) {
         if (~refs.indexOf(schema)) {
@@ -715,6 +733,7 @@
           fields: [{name: 'value', type: schema}]
         };
         refs.push(wrappedSchema);
+        opts.wrapUnions = true;
 
         var type = avsc.parse(wrappedSchema, opts);
         var read = type._read;
