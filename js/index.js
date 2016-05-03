@@ -43,8 +43,10 @@
       var schemaStr = JSON.stringify(schemaJson, null, 2); 
       runPreservingCursorPosition('schema', schemaElement.text, {context: schemaElement, param: schemaStr});
       // encode schema here.
-      eventObj.trigger('update-url', {schema:schemaStr});
-      validateSchema(schemaJson);
+      var isValid = validateSchema(schemaJson);
+      if (isValid) {
+        eventObj.trigger('update-url', {schema:schemaStr});
+      }
     }).on('input-changed', function(rawInput) {
       try {
         runPreservingCursorPosition('input' , setInputText, {context: inputElement, param: rawInput});
@@ -109,8 +111,12 @@
       if (data.schema) {
         // encode schema here..
         var jsonSchema = JSON.parse(data.schema);
-        var encodedSchema = metaType.toBuffer(jsonSchema);
-        data.schema = encodedSchema.toString('hex');
+        try {
+          var encodedSchema = metaType.toBuffer(jsonSchema);
+          data.schema = encodedSchema.toString('hex');
+        } catch (err) {
+          // Received an error while encoding schema. Do something with it.
+        }
       }
 
       newUrl = urlUtils.updateValues(newUrl, data);
@@ -597,7 +603,9 @@
         eventObj.trigger('update-layout');
       } catch (err) {
         eventObj.trigger('invalid-schema', err);
+        return false;
       }
+      return true;
     }
     function generateRandom() {
       if (window.type) {

@@ -12012,8 +12012,10 @@ function hasOwnProperty(obj, prop) {
       var schemaStr = JSON.stringify(schemaJson, null, 2); 
       runPreservingCursorPosition('schema', schemaElement.text, {context: schemaElement, param: schemaStr});
       // encode schema here.
-      eventObj.trigger('update-url', {schema:schemaStr});
-      validateSchema(schemaJson);
+      var isValid = validateSchema(schemaJson);
+      if (isValid) {
+        eventObj.trigger('update-url', {schema:schemaStr});
+      }
     }).on('input-changed', function(rawInput) {
       try {
         runPreservingCursorPosition('input' , setInputText, {context: inputElement, param: rawInput});
@@ -12566,7 +12568,9 @@ function hasOwnProperty(obj, prop) {
         eventObj.trigger('update-layout');
       } catch (err) {
         eventObj.trigger('invalid-schema', err);
+        return false;
       }
+      return true;
     }
     function generateRandom() {
       if (window.type) {
