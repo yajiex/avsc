@@ -11998,6 +11998,7 @@ function hasOwnProperty(obj, prop) {
         arrayKeyPattern = /(\d+)/g,
         reservedKeysPattern = /-[a-z]+-/g,
         whiteSpacePattern = /\s+/g,
+        hexPattern = /^[\d|a-f|A-F]+$/g,
         typingTimer,
         eventObj = utils.eventObj,
         urlUtils = utils.urlUtils,
@@ -12080,8 +12081,10 @@ function hasOwnProperty(obj, prop) {
       if (data.schema) {
         // encode schema here..
         var jsonSchema = JSON.parse(data.schema);
-        var encodedSchema = metaType.toBuffer(jsonSchema);
-        data.schema = encodedSchema.toString('hex');
+        if (metaType.isValid(jsonSchema)) {
+          var encodedSchema = metaType.toBuffer(jsonSchema);
+          data.schema = encodedSchema.toString('hex');
+        } // else, the schema will remain un-encoded.
       }
 
       newUrl = urlUtils.updateValues(newUrl, data);
@@ -12259,9 +12262,14 @@ function hasOwnProperty(obj, prop) {
     function populateFromQuery() {
       var s = urlUtils.readValue('schema');
       if(s) {
-        // decode schema.
-        var encodedSchema = new Buffer(s, 'hex');
-        var decodedSchema = metaType.fromBuffer(encodedSchema);
+        var decodedSchema;
+        if (hexPattern.test(s)){
+          // decode schema.
+          var encodedSchema = new Buffer(s, 'hex');
+          decodedSchema = metaType.fromBuffer(encodedSchema);
+        } else { 
+          decodedSchema = JSON.parse(s);
+        }// else, the schema is already decoded. 
         eventObj.trigger('schema-changed', decodedSchema);
       }
       
@@ -12900,7 +12908,10 @@ var metaType = avro.parse({
          "name": "Fixed",
          "fields": [
            {
-             "type": "string",
+             "type": [
+               "null",
+               "string"
+             ],
              "name": "name"
            },
            {

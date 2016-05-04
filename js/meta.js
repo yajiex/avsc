@@ -105,7 +105,10 @@ var metaType = avro.parse({
          "name": "Fixed",
          "fields": [
            {
-             "type": "string",
+             "type": [
+               "null",
+               "string"
+             ],
              "name": "name"
            },
            {
