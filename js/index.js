@@ -761,7 +761,7 @@
     }
 
     /**
-     * Convenience method to instrument a single object.
+     * Convenience metho to instrument a single object.
      * 
      * @param type {Type} The type to be instrumented.
      * @param obj {Object} A valid instance of `type`.

@@ -12730,7 +12730,7 @@ function hasOwnProperty(obj, prop) {
     }
 
     /**
-     * Convenience method to instrument a single object.
+     * Convenience metho to instrument a single object.
      * 
      * @param type {Type} The type to be instrumented.
      * @param obj {Object} A valid instance of `type`.
@@ -12803,6 +12803,8 @@ function hasOwnProperty(obj, prop) {
 },{"./meta":44,"./utils":45,"avsc":46,"buffer":16,"jquery":55}],44:[function(require,module,exports){
 var util = require('util'),
     avro = require('avsc');
+
+var defaultName = 'ignored';
 function MetaType(attr, opts) {
   avro.types.LogicalType.call(this, attr, opts, [avro.types.RecordType]);
 }
@@ -12844,7 +12846,7 @@ var primitiveSymbols = [
   "string"
 ];
 
-var metaType = avro.parse({
+var rawSchema = {
   "logicalType": "meta",
   "type": "record",
   "name": "Meta",
@@ -12883,7 +12885,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -12911,7 +12913,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -12956,7 +12958,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -12999,7 +13001,26 @@ var metaType = avro.parse({
      "name": "value"
    }
   ]
-}, {logicalTypes: {'meta': MetaType}, wrapUnions: true});
+};
+var refs = [];
+var hook = function(schema, opts) {
+  if (~refs.indexOf(schema)) return;
+  refs.push(schema);
+  var type = avro.parse(schema, opts);
+  var read = type._read;
+  type._read = function(tap) {
+    var obj = read.call(type, tap);
+    if (obj.name === defaultName){
+      obj.name = undefined;
+    }
+    return obj;
+  };
+  return type;  
+};
+
+var metaType = avro.parse(rawSchema, {logicalTypes: {'meta': MetaType},
+                                      typeHook: hook, /* To remove default names.*/
+                                      wrapUnions: true});
 
 function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
@@ -15411,6 +15432,7 @@ module.exports = {
  */
 
 var files = require('./files'),
+    utils = require('./utils'),
     path = require('path'),
     util = require('util');
 
@@ -15964,58 +15986,15 @@ Tokenizer.prototype._endOfString = function () {
 };
 
 /**
- * Returns end of JSON object, -1 if the end of the string is reached first.
- *
- * To keep the implementation simple, this function isn't a JSON validator. It
- * will gladly return a result for invalid JSON (which is OK since that will be
- * promptly rejected by the JSON parser). What matters is that it is guaranteed
- * to return the correct end when presented with valid JSON.
+ * Returns end of JSON object, throwing an error if the end is reached first.
  *
  */
 Tokenizer.prototype._endOfJson = function () {
-  var pos = this._pos;
-  var str = this._str;
-
-  // Handle the case of a simple literal separately.
-  var c = str.charAt(pos++);
-  if (/[\d-]/.test(c)) {
-    while (/[eE\d.+-]/.test(str.charAt(pos))) {
-      pos++;
-    }
-    return pos;
-  } else if (/true|null/.test(str.slice(pos - 1, pos + 3))) {
-    return pos + 3;
-  } else if (/false/.test(str.slice(pos - 1, pos + 4))) {
-    return pos + 4;
+  var pos = utils.jsonEnd(this._str, this._pos);
+  if (pos < 0) {
+    throw new Error('invalid JSON at ' + this._pos);
   }
-
-  // String, object, or array.
-  var depth = 0;
-  var literal = false;
-  do {
-    switch (c) {
-    case '{':
-    case '[':
-      if (!literal) { depth++; }
-      break;
-    case '}':
-    case ']':
-      if (!literal && !--depth) {
-        return pos;
-      }
-      break;
-    case '"':
-      literal = !literal;
-      if (!depth && !literal) {
-        return pos;
-      }
-      break;
-    case '\\':
-      pos++; // Skip the next character.
-    }
-  } while ((c = str.charAt(pos++)));
-
-  throw new Error('invalid JSON at ' + this._pos);
+  return pos;
 };
 
 /**
@@ -16093,13 +16072,11 @@ module.exports = {
   assemble: assemble
 };
 
-},{"./files":48,"path":24,"util":42}],52:[function(require,module,exports){
+},{"./files":48,"./utils":53,"path":24,"util":42}],52:[function(require,module,exports){
 (function (Buffer){
 /* jshint node: true */
 
-// TODO: Add `isValid` option which fails if a record's type is missing fields
-// present in the value.
-// TODO: Use toFastProperties on type reverse indices.
+// TODO: Use `toFastProperties` on type reverse indices.
 // TODO: Allow configuring when to write the size when writing arrays and maps,
 // and customizing their block size.
 // TODO: Code-generate `compare` and `clone` record and union methods.
@@ -16266,13 +16243,13 @@ function Type(attrs, opts) {
     var namespace = attrs.namespace === undefined ?
       opts && opts.namespace :
       attrs.namespace;
-    if (name) {
+    if (name !== undefined) {
+      // This isn't an anonymous type.
       name = qualify(name, namespace);
       if (isPrimitive(name)) {
         // Avro doesn't allow redefining primitive names.
         throw new Error(f('cannot rename primitive type: %j', name));
       }
-
       var registry = opts && opts.registry;
       if (registry) {
         if (registry[name] !== undefined) {
@@ -16299,7 +16276,7 @@ Type.isType = function (/* any, [prefix] ... */) {
   var any = arguments[0];
   if (
     !any ||
-    typeof any._updateResolver != 'function' ||
+    typeof any._update != 'function' ||
     typeof any.getTypeName != 'function'
   ) {
     // Not fool-proof, but most likely good enough.
@@ -16370,7 +16347,7 @@ Type.prototype.createResolver = function (type, opts) {
       return resolvers[index]._read(tap);
     };
   } else {
-    this._updateResolver(resolver, type, opts);
+    this._update(resolver, type, opts);
   }
 
   if (!resolver._read) {
@@ -16453,14 +16430,17 @@ Type.prototype.clone = function (val, opts) {
 };
 
 Type.prototype.isValid = function (val, opts) {
-  var cb, path;
-  if (opts && opts.errorHook) {
+  // We only have a single flag for now, so no need to complicate things.
+  var flags = (opts && opts.noUndeclaredFields) | 0;
+  var errorHook = opts && opts.errorHook;
+  var hook, path;
+  if (errorHook) {
     path = [];
-    cb = function (any, type) {
-      opts.errorHook.call(this, path.slice(), any, type, val);
+    hook = function (any, type) {
+      errorHook.call(this, path.slice(), any, type, val);
     };
   }
-  return this._check(val, path, cb);
+  return this._check(val, flags, hook, path);
 };
 
 Type.prototype.compareBuffers = function (buf1, buf2) {
@@ -16516,7 +16496,7 @@ Type.prototype._copy = utils.abstractFunction;
 Type.prototype._match = utils.abstractFunction;
 Type.prototype._read = utils.abstractFunction;
 Type.prototype._skip = utils.abstractFunction;
-Type.prototype._updateResolver = utils.abstractFunction;
+Type.prototype._update = utils.abstractFunction;
 Type.prototype._write = utils.abstractFunction;
 Type.prototype.compare = utils.abstractFunction;
 Type.prototype.getTypeName = utils.abstractFunction;
@@ -16535,7 +16515,7 @@ Type.prototype.random = utils.abstractFunction;
 function PrimitiveType() { Type.call(this); }
 util.inherits(PrimitiveType, Type);
 
-PrimitiveType.prototype._updateResolver = function (resolver, type) {
+PrimitiveType.prototype._update = function (resolver, type) {
   if (type.constructor === this.constructor) {
     resolver._read = this._read;
   }
@@ -16557,10 +16537,10 @@ PrimitiveType.prototype.toJSON = function () { return this.getTypeName(); };
 function NullType() { PrimitiveType.call(this); }
 util.inherits(NullType, PrimitiveType);
 
-NullType.prototype._check = function (val, path, cb) {
+NullType.prototype._check = function (val, flags, hook) {
   var b = val === null;
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16590,10 +16570,10 @@ NullType.prototype.random = NullType.prototype._read;
 function BooleanType() { PrimitiveType.call(this); }
 util.inherits(BooleanType, PrimitiveType);
 
-BooleanType.prototype._check = function (val, path, cb) {
+BooleanType.prototype._check = function (val, flags, hook) {
   var b = typeof val == 'boolean';
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16624,10 +16604,10 @@ BooleanType.prototype.random = function () { return RANDOM.nextBoolean(); };
 function IntType() { PrimitiveType.call(this); }
 util.inherits(IntType, PrimitiveType);
 
-IntType.prototype._check = function (val, path, cb) {
+IntType.prototype._check = function (val, flags, hook) {
   var b = val === (val | 0);
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16663,10 +16643,10 @@ IntType.prototype.random = function () { return RANDOM.nextInt(1000) | 0; };
 function LongType() { PrimitiveType.call(this); }
 util.inherits(LongType, PrimitiveType);
 
-LongType.prototype._check = function (val, path, cb) {
+LongType.prototype._check = function (val, flags, hook) {
   var b = typeof val == 'number' && val % 1 === 0 && isSafeLong(val);
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16692,7 +16672,7 @@ LongType.prototype._match = function (tap1, tap2) {
   return tap1.matchLong(tap2);
 };
 
-LongType.prototype._updateResolver = function (resolver, type) {
+LongType.prototype._update = function (resolver, type) {
   switch (type.getTypeName()) {
     case 'int':
     case 'long':
@@ -16734,10 +16714,10 @@ LongType.__with = function (methods, noUnpack) {
 function FloatType() { PrimitiveType.call(this); }
 util.inherits(FloatType, PrimitiveType);
 
-FloatType.prototype._check = function (val, path, cb) {
+FloatType.prototype._check = function (val, flags, hook) {
   var b = typeof val == 'number';
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16757,7 +16737,7 @@ FloatType.prototype._match = function (tap1, tap2) {
   return tap1.matchFloat(tap2);
 };
 
-FloatType.prototype._updateResolver = function (resolver, type) {
+FloatType.prototype._update = function (resolver, type) {
   switch (type.getTypeName()) {
     case 'float':
     case 'int':
@@ -16777,10 +16757,10 @@ FloatType.prototype.random = function () { return RANDOM.nextFloat(1e3); };
 function DoubleType() { PrimitiveType.call(this); }
 util.inherits(DoubleType, PrimitiveType);
 
-DoubleType.prototype._check = function (val, path, cb) {
+DoubleType.prototype._check = function (val, flags, hook) {
   var b = typeof val == 'number';
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16800,7 +16780,7 @@ DoubleType.prototype._match = function (tap1, tap2) {
   return tap1.matchDouble(tap2);
 };
 
-DoubleType.prototype._updateResolver = function (resolver, type) {
+DoubleType.prototype._update = function (resolver, type) {
   switch (type.getTypeName()) {
     case 'double':
     case 'float':
@@ -16821,10 +16801,10 @@ DoubleType.prototype.random = function () { return RANDOM.nextFloat(); };
 function StringType() { PrimitiveType.call(this); }
 util.inherits(StringType, PrimitiveType);
 
-StringType.prototype._check = function (val, path, cb) {
+StringType.prototype._check = function (val, flags, hook) {
   var b = typeof val == 'string';
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16844,7 +16824,7 @@ StringType.prototype._match = function (tap1, tap2) {
   return tap1.matchString(tap2);
 };
 
-StringType.prototype._updateResolver = function (resolver, type) {
+StringType.prototype._update = function (resolver, type) {
   switch (type.getTypeName()) {
     case 'bytes':
     case 'string':
@@ -16871,10 +16851,10 @@ StringType.prototype.random = function () {
 function BytesType() { PrimitiveType.call(this); }
 util.inherits(BytesType, PrimitiveType);
 
-BytesType.prototype._check = function (val, path, cb) {
+BytesType.prototype._check = function (val, flags, hook) {
   var b = Buffer.isBuffer(val);
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -16894,7 +16874,7 @@ BytesType.prototype._match = function (tap1, tap2) {
   return tap1.matchBytes(tap2);
 };
 
-BytesType.prototype._updateResolver = StringType.prototype._updateResolver;
+BytesType.prototype._update = StringType.prototype._update;
 
 BytesType.prototype._copy = function (obj, opts) {
   var buf;
@@ -17047,14 +17027,14 @@ UnwrappedUnionType.prototype._getLogicalIndex = function (any, index) {
   return index;
 };
 
-UnwrappedUnionType.prototype._check = function (val, path, cb) {
+UnwrappedUnionType.prototype._check = function (val, flags, hook, path) {
   var index = this._getIndex(val);
   var b = index !== undefined;
   if (b) {
-    return this._types[index]._check(val, path, cb);
+    return this._types[index]._check(val, flags, hook, path);
   }
-  if (cb) {
-    cb(val, this);
+  if (hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -17080,7 +17060,7 @@ UnwrappedUnionType.prototype._write = function (tap, val) {
   }
 };
 
-UnwrappedUnionType.prototype._updateResolver = function (resolver, type, opts) {
+UnwrappedUnionType.prototype._update = function (resolver, type, opts) {
   // jshint -W083
   // (The loop exits after the first function is created.)
   var i, l, typeResolver;
@@ -17215,7 +17195,7 @@ function WrappedUnionType(attrs, opts) {
 }
 util.inherits(WrappedUnionType, UnionType);
 
-WrappedUnionType.prototype._check = function (val, path, cb) {
+WrappedUnionType.prototype._check = function (val, flags, hook, path) {
   var b = false;
   if (val === null) {
     // Shortcut type lookup in this case.
@@ -17228,20 +17208,20 @@ WrappedUnionType.prototype._check = function (val, path, cb) {
       var name = keys[0];
       var index = this._branchIndices[name];
       if (index !== undefined) {
-        if (cb) {
+        if (hook) {
           // Slow path.
           path.push(name);
-          b = this._types[index]._check(val[name], path, cb);
+          b = this._types[index]._check(val[name], flags, hook, path);
           path.pop();
           return b;
         } else {
-          return this._types[index]._check(val[name]);
+          return this._types[index]._check(val[name], flags);
         }
       }
     }
   }
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -17280,7 +17260,7 @@ WrappedUnionType.prototype._write = function (tap, val) {
   }
 };
 
-WrappedUnionType.prototype._updateResolver = function (resolver, type, opts) {
+WrappedUnionType.prototype._update = function (resolver, type, opts) {
   // jshint -W083
   // (The loop exits after the first function is created.)
   var i, l, typeResolver, Class;
@@ -17417,10 +17397,10 @@ function EnumType(attrs, opts) {
 }
 util.inherits(EnumType, Type);
 
-EnumType.prototype._check = function (val, path, cb) {
+EnumType.prototype._check = function (val, flags, hook) {
   var b = this._indices[val] !== undefined;
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -17452,7 +17432,7 @@ EnumType.prototype.compare = function (val1, val2) {
   return utils.compare(this._indices[val1], this._indices[val2]);
 };
 
-EnumType.prototype._updateResolver = function (resolver, type) {
+EnumType.prototype._update = function (resolver, type) {
   var symbols = this._symbols;
   if (
     type.getTypeName() === 'enum' &&
@@ -17504,10 +17484,10 @@ function FixedType(attrs, opts) {
 }
 util.inherits(FixedType, Type);
 
-FixedType.prototype._check = function (val, path, cb) {
+FixedType.prototype._check = function (val, flags, hook) {
   var b = Buffer.isBuffer(val) && val.length === this._size;
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -17533,7 +17513,7 @@ FixedType.prototype._match = function (tap1, tap2) {
 
 FixedType.prototype.compare = Buffer.compare;
 
-FixedType.prototype._updateResolver = function (resolver, type) {
+FixedType.prototype._update = function (resolver, type) {
   if (
     type.getTypeName() === 'fixed' &&
     this._size === type._size &&
@@ -17581,10 +17561,10 @@ function MapType(attrs, opts) {
 }
 util.inherits(MapType, Type);
 
-MapType.prototype._check = function (val, path, cb) {
+MapType.prototype._check = function (val, flags, hook, path) {
   if (!val || typeof val != 'object' || Array.isArray(val)) {
-    if (cb) {
-      cb(val, this);
+    if (hook) {
+      hook(val, this);
     }
     return false;
   }
@@ -17592,20 +17572,20 @@ MapType.prototype._check = function (val, path, cb) {
   var keys = Object.keys(val);
   var b = true;
   var i, l, j, key;
-  if (cb) {
+  if (hook) {
     // Slow path.
     j = path.length;
     path.push('');
     for (i = 0, l = keys.length; i < l; i++) {
       key = path[j] = keys[i];
-      if (!this._values._check(val[key], path, cb)) {
+      if (!this._values._check(val[key], flags, hook, path)) {
         b = false;
       }
     }
     path.pop();
   } else {
     for (i = 0, l = keys.length; i < l; i++) {
-      if (!this._values._check(val[keys[i]])) {
+      if (!this._values._check(val[keys[i]], flags)) {
         return false;
       }
     }
@@ -17666,7 +17646,7 @@ MapType.prototype._match = function () {
   throw new Error('maps cannot be compared');
 };
 
-MapType.prototype._updateResolver = function (resolver, type, opts) {
+MapType.prototype._update = function (resolver, type, opts) {
   if (type.getTypeName() === 'map') {
     resolver._values = this._values.createResolver(type._values, opts);
     resolver._read = this._read;
@@ -17723,30 +17703,30 @@ function ArrayType(attrs, opts) {
 }
 util.inherits(ArrayType, Type);
 
-ArrayType.prototype._check = function (val, path, cb) {
+ArrayType.prototype._check = function (val, flags, hook, path) {
   if (!Array.isArray(val)) {
-    if (cb) {
-      cb(val, this);
+    if (hook) {
+      hook(val, this);
     }
     return false;
   }
 
   var b = true;
   var i, l, j;
-  if (cb) {
+  if (hook) {
     // Slow path.
     j = path.length;
     path.push('');
     for (i = 0, l = val.length; i < l; i++) {
       path[j] = '' + i;
-      if (!this._items._check(val[i], path, cb)) {
+      if (!this._items._check(val[i], flags, hook, path)) {
         b = false;
       }
     }
     path.pop();
   } else {
     for (i = 0, l = val.length; i < l; i++) {
-      if (!this._items._check(val[i])) {
+      if (!this._items._check(val[i], flags)) {
         return false;
       }
     }
@@ -17819,7 +17799,7 @@ ArrayType.prototype._match = function (tap1, tap2) {
   return utils.compare(n1, n2);
 };
 
-ArrayType.prototype._updateResolver = function (resolver, type, opts) {
+ArrayType.prototype._update = function (resolver, type, opts) {
   if (type.getTypeName() === 'array') {
     resolver._items = this._items.createResolver(type._items, opts);
     resolver._read = this._read;
@@ -17886,6 +17866,10 @@ ArrayType.prototype.toJSON = function () {
 function RecordType(attrs, opts) {
   Type.call(this, attrs, opts);
 
+  // Force creation of the options object in case we need to register this
+  // record's name.
+  opts = opts || {};
+
   if (!Array.isArray(attrs.fields)) {
     throw new Error(f('non-array record fields: %j', attrs.fields));
   }
@@ -17893,21 +17877,23 @@ function RecordType(attrs, opts) {
     throw new Error(f('duplicate field name: %j', attrs.fields));
   }
 
-  var namespace;
-  if (opts) {
-    // Save current namespace.
-    namespace = opts.namespace;
-    if (attrs.namespace !== undefined) {
-      opts.namespace = attrs.namespace;
-    } else {
-      var match = /^(.*)\.[^.]+$/.exec(this._name);
-      opts.namespace = match ? match[1] : '';
-    }
+  // Save the namespace to restore it as we leave this record's scope.
+  var namespace = opts.namespace;
+  if (attrs.namespace !== undefined) {
+    opts.namespace = attrs.namespace;
+  } else {
+    // Fully qualified names' namespaces are used when no explicit namespace
+    // attribute was specified.
+    var match = /^(.*)\.[^.]+$/.exec(this._name);
+    opts.namespace = match ? match[1] : '';
   }
-  this._fields = attrs.fields.map(function (f) { return new Field(f, opts); });
-  if (opts) {
-    opts.namespace = namespace;
-  }
+  this._fieldsMap = {};
+  this._fields = attrs.fields.map(function (f) {
+    var field = new Field(f, opts);
+    this._fieldsMap[field.getName()] = field;
+    return field;
+  }, this);
+  opts.namespace = namespace;
 
   this._isError = attrs.type === 'error';
   this._constructor = this._createConstructor();
@@ -17970,12 +17956,16 @@ RecordType.prototype._createConstructor = function () {
 
 RecordType.prototype._createChecker = function () {
   // jshint -W054
-  var names = ['t'];
-  var values = [this];
+  var names = [];
+  var values = [];
   var name = this._getConstructorName();
-  var body = 'return function check' + name + '(v, p, c) {\n';
-  body += '  if (v === null || typeof v != \'object\') {\n';
-  body += '    if (c) { c(v, t); }\n';
+  var body = 'return function check' + name + '(v, f, h, p) {\n';
+  body += '  if (\n';
+  body += '    v === null ||\n';
+  body += '    typeof v != \'object\' ||\n';
+  body += '    (f && !this._checkFields(v))\n';
+  body += '  ) {\n';
+  body += '    if (h) { h(v, this); }\n';
   body += '    return false;\n';
   body += '  }\n';
   if (!this._fields.length) {
@@ -17990,7 +17980,7 @@ RecordType.prototype._createChecker = function () {
         body += '  var v' + i + ' = v.' + field._name + ';\n';
       }
     }
-    body += '  if (c) {\n';
+    body += '  if (h) {\n';
     body += '    var b = 1;\n';
     body += '    var j = p.length;\n';
     body += '    p.push(\'\');\n';
@@ -17998,22 +17988,21 @@ RecordType.prototype._createChecker = function () {
     for (i = 0, l = this._fields.length; i < l; i++) {
       field = this._fields[i];
       body += '    p[j] = \'' + field._name + '\';\n';
+      body += '    b &= ';
       if (field.getDefault() === undefined) {
-        body += '    b &= t' + i + '._check(v.' + field._name + ', p, c);\n';
+        body += 't' + i + '._check(v.' + field._name + ', f, h, p);\n';
       } else {
-        body += '    b &= v' + i + ' === undefined || ';
-        body += 't' + i + '._check(v' + i + ', p, c);\n';
+        body += 'v' + i + ' === undefined || ';
+        body += 't' + i + '._check(v' + i + ', f, h, p);\n';
       }
     }
     body += '    p.pop();\n';
     body += '    return !!b;\n';
     body += '  } else {\n    return (\n      ';
     body += this._fields.map(function (field, i) {
-      if (field.getDefault() === undefined) {
-        return 't' + i + '._check(v.' + field._name + ')';
-      } else {
-        return '(v' + i + ' === undefined || t' + i + '._check(v' + i + '))';
-      }
+      return field.getDefault() === undefined ?
+        't' + i + '._check(v.' + field._name + ', f)' :
+        '(v' + i + ' === undefined || t' + i + '._check(v' + i + ', f))';
     }).join(' &&\n      ');
     body += '\n    );\n  }\n';
   }
@@ -18031,10 +18020,10 @@ RecordType.prototype._createReader = function () {
     values.push(this._fields[i]._type);
   }
   var name = this._getConstructorName();
-  var body = 'return function read' + name + '(tap) {\n';
-  body += '  return new ' + name + '(';
-  body += names.map(function (t) { return t + '._read(tap)'; }).join();
-  body += ');\n};';
+  var body = 'return function read' + name + '(t) {\n';
+  body += '  return new ' + name + '(\n    ';
+  body += names.map(function (s) { return s + '._read(t)'; }).join(',\n    ');
+  body += '\n  );\n};';
   names.unshift(name);
   // We can do this since the JS spec guarantees that function arguments are
   // evaluated from left to right.
@@ -18044,13 +18033,13 @@ RecordType.prototype._createReader = function () {
 RecordType.prototype._createSkipper = function () {
   // jshint -W054
   var args = [];
-  var body = 'return function skip' + this._getConstructorName() + '(tap) {\n';
+  var body = 'return function skip' + this._getConstructorName() + '(t) {\n';
   var values = [];
   var i, l;
   for (i = 0, l = this._fields.length; i < l; i++) {
     args.push('t' + i);
     values.push(this._fields[i]._type);
-    body += '  t' + i + '._skip(tap);\n';
+    body += '  t' + i + '._skip(t);\n';
   }
   body += '}';
   return new Function(args.join(), body).apply(undefined, values);
@@ -18061,7 +18050,7 @@ RecordType.prototype._createWriter = function () {
   // We still do default handling here, in case a normal JS object is passed.
   var args = [];
   var name = this._getConstructorName();
-  var body = 'return function write' + name + '(tap, v) {\n';
+  var body = 'return function write' + name + '(t, v) {\n';
   var values = [];
   var i, l, field, value;
   for (i = 0, l = this._fields.length; i < l; i++) {
@@ -18070,7 +18059,7 @@ RecordType.prototype._createWriter = function () {
     values.push(field._type);
     body += '  ';
     if (field.getDefault() === undefined) {
-      body += 't' + i + '._write(tap, v.' + field._name + ');\n';
+      body += 't' + i + '._write(t, v.' + field._name + ');\n';
     } else {
       value = field._type.toBuffer(field.getDefault()).toString('binary');
       // Convert the default value to a binary string ahead of time. We aren't
@@ -18078,17 +18067,17 @@ RecordType.prototype._createWriter = function () {
       // had our own buffer pool, this could be an idea in the future.
       args.push('d' + i);
       values.push(value);
-      body += 'var v' + i + ' = v.' + field._name + '; ';
-      body += 'if (v' + i + ' === undefined) { ';
-      body += 'tap.writeBinary(d' + i + ', ' + value.length + ');';
-      body += ' } else { t' + i + '._write(tap, v' + i + '); }\n';
+      body += 'var v' + i + ' = v.' + field._name + ';\n';
+      body += 'if (v' + i + ' === undefined) {\n';
+      body += '    t.writeBinary(d' + i + ', ' + value.length + ');\n';
+      body += '  } else {\n    t' + i + '._write(t, v' + i + ');\n  }\n';
     }
   }
   body += '}';
   return new Function(args.join(), body).apply(undefined, values);
 };
 
-RecordType.prototype._updateResolver = function (resolver, type, opts) {
+RecordType.prototype._update = function (resolver, type, opts) {
   // jshint -W054
   if (type._name && !~getAliases(this).indexOf(type._name)) {
     throw new Error(f('no alias found for %s', type._name));
@@ -18139,10 +18128,10 @@ RecordType.prototype._updateResolver = function (resolver, type, opts) {
   var uname = this._getConstructorName();
   var args = [uname];
   var values = [this._constructor];
-  var body = '  return function read' + uname + '(tap,lazy) {\n';
+  var body = '  return function read' + uname + '(t, b) {\n';
   for (i = 0; i < wFields.length; i++) {
     if (i === lazyIndex) {
-      body += '  if (!lazy) {\n';
+      body += '  if (!b) {\n';
     }
     field = type._fields[i];
     name = field._name;
@@ -18150,12 +18139,12 @@ RecordType.prototype._updateResolver = function (resolver, type, opts) {
     if (resolvers[name] === undefined) {
       args.push('t' + i);
       values.push(field._type);
-      body += 't' + i + '._skip(tap);\n';
+      body += 't' + i + '._skip(t);\n';
     } else {
       args.push('t' + i);
       values.push(resolvers[name].resolver);
       body += 'var ' + resolvers[name].name + ' = ';
-      body += 't' + i + '._read(tap);\n';
+      body += 't' + i + '._read(t);\n';
     }
   }
   if (~lazyIndex) {
@@ -18184,6 +18173,17 @@ RecordType.prototype._match = function (tap1, tap2) {
     }
   }
   return 0;
+};
+
+RecordType.prototype._checkFields = function (obj) {
+  var keys = Object.keys(obj);
+  var i, l;
+  for (i = 0, l = keys.length; i < l; i++) {
+    if (!this._fieldsMap[keys[i]]) {
+      return false;
+    }
+  }
+  return true;
 };
 
 RecordType.prototype._copy = function (val, opts) {
@@ -18235,14 +18235,7 @@ RecordType.prototype.random = function () {
 RecordType.prototype.getAliases = function () { return this._aliases; };
 
 RecordType.prototype.getField = function (name) {
-  var fields = this._fields;
-  var i, l, field;
-  for (i = 0, l = fields.length; i < l; i++) {
-    field = fields[i];
-    if (field._name === name) {
-      return field;
-    }
-  }
+  return this._fieldsMap[name];
 };
 
 RecordType.prototype.getFields = function () { return this._fields.slice(); };
@@ -18295,19 +18288,19 @@ LogicalType.prototype._write = function (tap, any) {
   this._underlyingType._write(tap, this._toValue(any));
 };
 
-LogicalType.prototype._check = function (any, path, cb) {
+LogicalType.prototype._check = function (any, flags, hook, path) {
   try {
     var val = this._toValue(any);
   } catch (err) {
     // Handled below.
   }
   if (val === undefined) {
-    if (cb) {
-      cb(any, this);
+    if (hook) {
+      hook(any, this);
     }
     return false;
   }
-  return this._underlyingType._check(val, path, cb);
+  return this._underlyingType._check(val, flags, hook, path);
 };
 
 LogicalType.prototype._copy = function (any, opts) {
@@ -18322,7 +18315,7 @@ LogicalType.prototype._copy = function (any, opts) {
   }
 };
 
-LogicalType.prototype._updateResolver = function (resolver, type, opts) {
+LogicalType.prototype._update = function (resolver, type, opts) {
   var _fromValue = this._resolve(type, opts);
   if (_fromValue) {
     resolver._read = function (tap) { return _fromValue(type._read(tap)); };
@@ -18378,10 +18371,10 @@ function AbstractLongType(noUnpack) {
 }
 util.inherits(AbstractLongType, LongType);
 
-AbstractLongType.prototype._check = function (val, path, cb) {
+AbstractLongType.prototype._check = function (val, flags, hook) {
   var b = this._isValid(val);
-  if (!b && cb) {
-    cb(val, this);
+  if (!b && hook) {
+    hook(val, this);
   }
   return b;
 };
@@ -18957,6 +18950,63 @@ function hasDuplicates(arr, fn) {
 }
 
 /**
+ * Returns offset in the string of the end of JSON object (-1 if past the end).
+ *
+ * To keep the implementation simple, this function isn't a JSON validator. It
+ * will gladly return a result for invalid JSON (which is OK since that will be
+ * promptly rejected by the JSON parser). What matters is that it is guaranteed
+ * to return the correct end when presented with valid JSON.
+ *
+ * @param str {String} Input string containing serialized JSON..
+ * @param pos {Number} Starting position.
+ *
+ */
+function jsonEnd(str, pos) {
+  pos = pos | 0;
+
+  // Handle the case of a simple literal separately.
+  var c = str.charAt(pos++);
+  if (/[\d-]/.test(c)) {
+    while (/[eE\d.+-]/.test(str.charAt(pos))) {
+      pos++;
+    }
+    return pos;
+  } else if (/true|null/.test(str.slice(pos - 1, pos + 3))) {
+    return pos + 3;
+  } else if (/false/.test(str.slice(pos - 1, pos + 4))) {
+    return pos + 4;
+  }
+
+  // String, object, or array.
+  var depth = 0;
+  var literal = false;
+  do {
+    switch (c) {
+    case '{':
+    case '[':
+      if (!literal) { depth++; }
+      break;
+    case '}':
+    case ']':
+      if (!literal && !--depth) {
+        return pos;
+      }
+      break;
+    case '"':
+      literal = !literal;
+      if (!depth && !literal) {
+        return pos;
+      }
+      break;
+    case '\\':
+      pos++; // Skip the next character.
+    }
+  } while ((c = str.charAt(pos++)));
+
+  return -1;
+}
+
+/**
  * "Abstract" function to help with "subclassing".
  *
  */
@@ -19479,6 +19529,7 @@ module.exports = {
   capitalize: capitalize,
   getHash: getHash,
   compare: compare,
+  jsonEnd: jsonEnd,
   toMap: toMap,
   singleIndexOf: singleIndexOf,
   hasDuplicates: hasDuplicates,
@@ -19522,6 +19573,7 @@ var EMPTY_ARRAY_TYPE = createType({type: 'array', items: 'null'});
 function infer(val, opts) {
   opts = opts || {};
 
+  // Optional custom inference hook.
   if (opts.valueHook) {
     var type = opts.valueHook(val, opts);
     if (type !== undefined) {
@@ -19731,7 +19783,7 @@ function combineBuffers(types, opts) {
     }
     if (size === -1) {
       size = type.getSize();
-    } else if (type.getSize() != size) {
+    } else if (type.getSize() !== size) {
       // Don't create a bytes type right away, we might be able to reuse one
       // later on in the types array. Just mark this for now.
       size = -2;
@@ -19743,7 +19795,8 @@ function combineBuffers(types, opts) {
 /**
  * Combine maps and records.
  *
- * Field defaults are kept, with later definitions overriding previous ones.
+ * Field defaults are kept when possible (i.e. when no coercion to a map
+ * happens), with later definitions overriding previous ones.
  *
  */
 function combineObjects(types, opts) {
@@ -19758,33 +19811,34 @@ function combineObjects(types, opts) {
   var i, l, type, fields;
   for (i = 0, l = types.length; i < l; i++) {
     type = types[i];
-    if (!isValidRecord || type.getTypeName() === 'map') {
+    if (type.getTypeName() === 'map') {
       isValidRecord = false;
       allTypes.push(type.getValuesType());
     } else {
       fields = type.getFields();
-
       var j, m, field, fieldDefault, fieldName, fieldType;
       for (j = 0, m = fields.length; j < m; j++) {
         field = fields[j];
         fieldName = field.getName();
         fieldType = field.getType();
         allTypes.push(fieldType);
-        if (!fieldTypes[fieldName]) {
-          fieldTypes[fieldName] = [];
-        }
-        fieldTypes[fieldName].push(fieldType);
-        fieldDefault = field.getDefault();
-        if (fieldDefault !== undefined) {
-          // Later defaults will override any previous ones.
-          fieldDefaults[fieldName] = fieldDefault;
+        if (isValidRecord) {
+          if (!fieldTypes[fieldName]) {
+            fieldTypes[fieldName] = [];
+          }
+          fieldTypes[fieldName].push(fieldType);
+          fieldDefault = field.getDefault();
+          if (fieldDefault !== undefined) {
+            // Later defaults will override any previous ones.
+            fieldDefaults[fieldName] = fieldDefault;
+          }
         }
       }
     }
   }
 
   if (isValidRecord) {
-    // Check that no fields are missing, or that we have the approriate
+    // Check that no fields are missing and that we have the approriate
     // defaults for those which are.
     var fieldNames = Object.keys(fieldTypes);
     for (i = 0, l = fieldNames.length; i < l; i++) {
@@ -19855,7 +19909,7 @@ module.exports = {
 }).call(this,{"isBuffer":require("../../../../../.npmprefix/lib/node_modules/browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js")})
 },{"../../../../../.npmprefix/lib/node_modules/browserify/node_modules/insert-module-globals/node_modules/is-buffer/index.js":22,"./types":52,"./utils":53}],55:[function(require,module,exports){
 /*!
- * jQuery JavaScript Library v2.2.0
+ * jQuery JavaScript Library v2.2.3
  * http://jquery.com/
  *
  * Includes Sizzle.js
@@ -19865,7 +19919,7 @@ module.exports = {
  * Released under the MIT license
  * http://jquery.org/license
  *
- * Date: 2016-01-08T20:02Z
+ * Date: 2016-04-05T19:26Z
  */
 
 (function( global, factory ) {
@@ -19921,7 +19975,7 @@ var support = {};
 
 
 var
-	version = "2.2.0",
+	version = "2.2.3",
 
 	// Define a local copy of jQuery
 	jQuery = function( selector, context ) {
@@ -20132,6 +20186,7 @@ jQuery.extend( {
 	},
 
 	isPlainObject: function( obj ) {
+		var key;
 
 		// Not plain objects:
 		// - Any object or value whose internal [[Class]] property is not "[object Object]"
@@ -20141,14 +20196,18 @@ jQuery.extend( {
 			return false;
 		}
 
+		// Not own constructor property must be Object
 		if ( obj.constructor &&
-				!hasOwn.call( obj.constructor.prototype, "isPrototypeOf" ) ) {
+				!hasOwn.call( obj, "constructor" ) &&
+				!hasOwn.call( obj.constructor.prototype || {}, "isPrototypeOf" ) ) {
 			return false;
 		}
 
-		// If the function hasn't returned already, we're confident that
-		// |obj| is a plain object, created by {} or constructed with new Object
-		return true;
+		// Own properties are enumerated firstly, so to speed up,
+		// if last one is own, then all properties are own
+		for ( key in obj ) {}
+
+		return key === undefined || hasOwn.call( obj, key );
 	},
 
 	isEmptyObject: function( obj ) {
@@ -24335,7 +24394,7 @@ function on( elem, types, selector, data, fn, one ) {
 	if ( fn === false ) {
 		fn = returnFalse;
 	} else if ( !fn ) {
-		return this;
+		return elem;
 	}
 
 	if ( one === 1 ) {
@@ -24984,14 +25043,14 @@ var
 	rscriptTypeMasked = /^true\/(.*)/,
 	rcleanScript = /^\s*<!(?:\[CDATA\[|--)|(?:\]\]|--)>\s*$/g;
 
+// Manipulating tables requires a tbody
 function manipulationTarget( elem, content ) {
-	if ( jQuery.nodeName( elem, "table" ) &&
-		jQuery.nodeName( content.nodeType !== 11 ? content : content.firstChild, "tr" ) ) {
+	return jQuery.nodeName( elem, "table" ) &&
+		jQuery.nodeName( content.nodeType !== 11 ? content : content.firstChild, "tr" ) ?
 
-		return elem.getElementsByTagName( "tbody" )[ 0 ] || elem;
-	}
-
-	return elem;
+		elem.getElementsByTagName( "tbody" )[ 0 ] ||
+			elem.appendChild( elem.ownerDocument.createElement( "tbody" ) ) :
+		elem;
 }
 
 // Replace/restore the type attribute of script elements for safe DOM manipulation
@@ -25498,7 +25557,7 @@ var getStyles = function( elem ) {
 		// FF meanwhile throws on frame elements through "defaultView.getComputedStyle"
 		var view = elem.ownerDocument.defaultView;
 
-		if ( !view.opener ) {
+		if ( !view || !view.opener ) {
 			view = window;
 		}
 
@@ -25647,15 +25706,18 @@ function curCSS( elem, name, computed ) {
 		style = elem.style;
 
 	computed = computed || getStyles( elem );
+	ret = computed ? computed.getPropertyValue( name ) || computed[ name ] : undefined;
+
+	// Support: Opera 12.1x only
+	// Fall back to style even without computed
+	// computed is undefined for elems on document fragments
+	if ( ( ret === "" || ret === undefined ) && !jQuery.contains( elem.ownerDocument, elem ) ) {
+		ret = jQuery.style( elem, name );
+	}
 
 	// Support: IE9
 	// getPropertyValue is only needed for .css('filter') (#12537)
 	if ( computed ) {
-		ret = computed.getPropertyValue( name ) || computed[ name ];
-
-		if ( ret === "" && !jQuery.contains( elem.ownerDocument, elem ) ) {
-			ret = jQuery.style( elem, name );
-		}
 
 		// A tribute to the "awesome hack by Dean Edwards"
 		// Android Browser returns percentage for some values,
@@ -27178,6 +27240,12 @@ jQuery.extend( {
 	}
 } );
 
+// Support: IE <=11 only
+// Accessing the selectedIndex property
+// forces the browser to respect setting selected
+// on the option
+// The getter ensures a default option is selected
+// when in an optgroup
 if ( !support.optSelected ) {
 	jQuery.propHooks.selected = {
 		get: function( elem ) {
@@ -27186,6 +27254,16 @@ if ( !support.optSelected ) {
 				parent.parentNode.selectedIndex;
 			}
 			return null;
+		},
+		set: function( elem ) {
+			var parent = elem.parentNode;
+			if ( parent ) {
+				parent.selectedIndex;
+
+				if ( parent.parentNode ) {
+					parent.parentNode.selectedIndex;
+				}
+			}
 		}
 	};
 }
@@ -27380,7 +27458,8 @@ jQuery.fn.extend( {
 
 
 
-var rreturn = /\r/g;
+var rreturn = /\r/g,
+	rspaces = /[\x20\t\r\n\f]+/g;
 
 jQuery.fn.extend( {
 	val: function( value ) {
@@ -27456,9 +27535,15 @@ jQuery.extend( {
 		option: {
 			get: function( elem ) {
 
-				// Support: IE<11
-				// option.value not trimmed (#14858)
-				return jQuery.trim( elem.value );
+				var val = jQuery.find.attr( elem, "value" );
+				return val != null ?
+					val :
+
+					// Support: IE10-11+
+					// option.text throws exceptions (#14686, #14858)
+					// Strip and collapse whitespace
+					// https://html.spec.whatwg.org/#strip-and-collapse-whitespace
+					jQuery.trim( jQuery.text( elem ) ).replace( rspaces, " " );
 			}
 		},
 		select: {
@@ -27511,7 +27596,7 @@ jQuery.extend( {
 				while ( i-- ) {
 					option = options[ i ];
 					if ( option.selected =
-							jQuery.inArray( jQuery.valHooks.option.get( option ), values ) > -1
+						jQuery.inArray( jQuery.valHooks.option.get( option ), values ) > -1
 					) {
 						optionSet = true;
 					}
@@ -27705,7 +27790,7 @@ jQuery.extend( jQuery.event, {
 				// But now, this "simulate" function is used only for events
 				// for which stopPropagation() is noop, so there is no need for that anymore.
 				//
-				// For the compat branch though, guard for "click" and "submit"
+				// For the 1.x branch though, guard for "click" and "submit"
 				// events is still used, but was moved to jQuery.event.stopPropagation function
 				// because `originalEvent` should point to the original event for the constancy
 				// with other events and for more focused logic
@@ -29206,18 +29291,6 @@ jQuery.ajaxPrefilter( "json jsonp", function( s, originalSettings, jqXHR ) {
 
 
 
-// Support: Safari 8+
-// In Safari 8 documents created via document.implementation.createHTMLDocument
-// collapse sibling forms: the second one becomes a child of the first one.
-// Because of that, this security measure has to be disabled in Safari 8.
-// https://bugs.webkit.org/show_bug.cgi?id=137337
-support.createHTMLDocument = ( function() {
-	var body = document.implementation.createHTMLDocument( "" ).body;
-	body.innerHTML = "<form></form><form></form>";
-	return body.childNodes.length === 2;
-} )();
-
-
 // Argument "data" should be string of html
 // context (optional): If specified, the fragment will be created in this context,
 // defaults to document
@@ -29230,12 +29303,7 @@ jQuery.parseHTML = function( data, context, keepScripts ) {
 		keepScripts = context;
 		context = false;
 	}
-
-	// Stop scripts or inline event handlers from being executed immediately
-	// by using document.implementation
-	context = context || ( support.createHTMLDocument ?
-		document.implementation.createHTMLDocument( "" ) :
-		document );
+	context = context || document;
 
 	var parsed = rsingleTag.exec( data ),
 		scripts = !keepScripts && [];
@@ -29317,7 +29385,7 @@ jQuery.fn.load = function( url, params, callback ) {
 		// If it fails, this function gets "jqXHR", "status", "error"
 		} ).always( callback && function( jqXHR, status ) {
 			self.each( function() {
-				callback.apply( self, response || [ jqXHR.responseText, status, jqXHR ] );
+				callback.apply( this, response || [ jqXHR.responseText, status, jqXHR ] );
 			} );
 		} );
 	}
@@ -29475,11 +29543,8 @@ jQuery.fn.extend( {
 			}
 
 			// Add offsetParent borders
-			// Subtract offsetParent scroll positions
-			parentOffset.top += jQuery.css( offsetParent[ 0 ], "borderTopWidth", true ) -
-				offsetParent.scrollTop();
-			parentOffset.left += jQuery.css( offsetParent[ 0 ], "borderLeftWidth", true ) -
-				offsetParent.scrollLeft();
+			parentOffset.top += jQuery.css( offsetParent[ 0 ], "borderTopWidth", true );
+			parentOffset.left += jQuery.css( offsetParent[ 0 ], "borderLeftWidth", true );
 		}
 
 		// Subtract parent offsets and element margins

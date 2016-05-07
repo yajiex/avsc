@@ -1,5 +1,7 @@
 var util = require('util'),
     avro = require('avsc');
+
+var defaultName = 'ignored';
 function MetaType(attr, opts) {
   avro.types.LogicalType.call(this, attr, opts, [avro.types.RecordType]);
 }
@@ -41,7 +43,7 @@ var primitiveSymbols = [
   "string"
 ];
 
-var metaType = avro.parse({
+var rawSchema = {
   "logicalType": "meta",
   "type": "record",
   "name": "Meta",
@@ -80,7 +82,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -108,7 +110,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -153,7 +155,7 @@ var metaType = avro.parse({
            {
              "type": "string",
              "name": "name",
-             "default": ""
+             "default": defaultName 
            },
            {
              "type": {
@@ -196,7 +198,26 @@ var metaType = avro.parse({
      "name": "value"
    }
   ]
-}, {logicalTypes: {'meta': MetaType}, wrapUnions: true});
+};
+var refs = [];
+var hook = function(schema, opts) {
+  if (~refs.indexOf(schema)) return;
+  refs.push(schema);
+  var type = avro.parse(schema, opts);
+  var read = type._read;
+  type._read = function(tap) {
+    var obj = read.call(type, tap);
+    if (obj.name === defaultName){
+      obj.name = undefined;
+    }
+    return obj;
+  };
+  return type;  
+};
+
+var metaType = avro.parse(rawSchema, {logicalTypes: {'meta': MetaType},
+                                      typeHook: hook, /* To remove default names.*/
+                                      wrapUnions: true});
 
 function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
