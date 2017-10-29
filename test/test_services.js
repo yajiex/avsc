@@ -384,10 +384,7 @@ suite('services', function () {
         .on('finish', function () {
           assert.deepEqual(
             messages,
-            [
-              {id: null, payload: [new Buffer([0, 1]), new Buffer([2])]},
-              {id: null, payload: [new Buffer([3, 4])]}
-            ]
+            [new Buffer([0, 1, 2]), new Buffer([3, 4])]
           );
           done();
         })
@@ -405,10 +402,7 @@ suite('services', function () {
       createReadableStream(frames)
         .pipe(new FrameDecoder())
         .on('error', function () {
-          assert.deepEqual(
-            messages,
-            [{id: null, payload: [new Buffer([0, 1]), new Buffer([2])]}]
-          );
+          assert.deepEqual(messages, [new Buffer([0, 1, 2])]);
           done();
         })
         .pipe(createWritableStream(messages));
@@ -435,10 +429,7 @@ suite('services', function () {
     });
 
     test('encode', function (done) {
-      var messages = [
-        {id: 1, payload: [new Buffer([1, 3, 5]), new Buffer([6, 8])]},
-        {id: 4, payload: [new Buffer([123, 23])]}
-      ];
+      var messages = [new Buffer([1, 3, 5]), new Buffer([123, 23])];
       var frames = [];
       createReadableStream(messages)
         .pipe(new FrameEncoder())
@@ -449,8 +440,6 @@ suite('services', function () {
             [
               new Buffer([0, 0, 0, 3]),
               new Buffer([1, 3, 5]),
-              new Buffer([0, 0, 0, 2]),
-              new Buffer([6, 8]),
               new Buffer([0, 0, 0, 0]),
               new Buffer([0, 0, 0, 2]),
               new Buffer([123, 23]),
@@ -462,22 +451,11 @@ suite('services', function () {
     });
 
     test('roundtrip', function (done) {
-      var type = types.Type.forSchema({
-        type: 'record',
-        name: 'Record',
-        fields: [
-          {name: 'id', type: 'null'},
-          {name: 'payload', type: {type: 'array', items: 'bytes'}}
-        ]
-      });
+      var type = types.Type.forSchema('bytes');
       var n = 100;
       var src = [];
       while (n--) {
-        var record = type.random();
-        record.payload = record.payload.filter(function (arr) {
-          return arr.length;
-        });
-        src.push(record);
+        src.push(type.random());
       }
       var dst = [];
       var encoder = new FrameEncoder();
@@ -878,9 +856,7 @@ suite('services', function () {
       var numHandshakes = 0;
       var client = svc.createClient();
       client.createChannel(function (cb) {
-        return function (obj) {
-          cb(null, {id: obj.id, payload: [hres.toBuffer()]});
-        };
+        return function () { cb(null, hres.toBuffer()); };
       }, {objectMode: true}).on('handshake', function (hreq, actualHres) {
         numHandshakes++;
         assert.deepEqual(actualHres, hres);
