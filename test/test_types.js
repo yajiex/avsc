@@ -43,8 +43,8 @@ suite('types', function () {
 
     test('get name', function () {
       var t = new builtins.BooleanType();
-      assert.strictEqual(t.getName(), undefined);
-      assert.equal(t.getName(true), 'boolean');
+      assert.strictEqual(t.name, undefined);
+      assert.equal(t.branchName, 'boolean');
     });
 
   });
@@ -432,8 +432,8 @@ suite('types', function () {
 
     test('getTypeName', function () {
       var t = new builtins.UnwrappedUnionType(['null', 'int']);
-      assert.strictEqual(t.getName(), undefined);
-      assert.strictEqual(t.getName(true), undefined);
+      assert.strictEqual(t.name, undefined);
+      assert.strictEqual(t.branchName, undefined);
       assert.equal(t.typeName, 'union:unwrapped');
     });
 
@@ -869,10 +869,10 @@ suite('types', function () {
         namespace: 'latin',
         aliases: ['Character', 'alphabet.Letter']
       });
-      var aliases = t.getAliases();
+      var aliases = t.aliases;
       assert.deepEqual(aliases, ['latin.Character', 'alphabet.Letter']);
       aliases.push('Char');
-      assert.equal(t.getAliases().length, 3);
+      assert.equal(t.aliases.length, 3);
     });
 
     test('get symbols', function () {
@@ -894,8 +894,8 @@ suite('types', function () {
     test('missing name', function () {
       var schema = {type: 'enum', symbols: ['A', 'B']};
       var t = Type.forSchema(schema);
-      assert.strictEqual(t.getName(), undefined);
-      assert.strictEqual(t.getName(true), 'enum');
+      assert.strictEqual(t.name, undefined);
+      assert.strictEqual(t.branchName, 'enum');
       assert.throws(function () {
         Type.forSchema(schema, {noAnonymousTypes: true});
       });
@@ -1000,8 +1000,8 @@ suite('types', function () {
         name: 'Id',
         namespace: 'id'
       });
-      assert.equal(t.getName(), 'id.Id');
-      assert.equal(t.getName(true), 'id.Id');
+      assert.equal(t.name, 'id.Id');
+      assert.equal(t.branchName, 'id.Id');
     });
 
     test('get aliases', function () {
@@ -1010,10 +1010,10 @@ suite('types', function () {
         size: 3,
         name: 'Id'
       });
-      var aliases = t.getAliases();
+      var aliases = t.aliases;
       assert.deepEqual(aliases, []);
       aliases.push('ID');
-      assert.equal(t.getAliases().length, 1);
+      assert.equal(t.aliases.length, 1);
     });
 
     test('get size', function () {
@@ -1233,8 +1233,8 @@ suite('types', function () {
 
     test('getName', function () {
       var t = new builtins.MapType({type: 'map', values: 'int'});
-      assert.strictEqual(t.getName(), undefined);
-      assert.strictEqual(t.getName(true), 'map');
+      assert.strictEqual(t.name, undefined);
+      assert.strictEqual(t.branchName, 'map');
     });
 
   });
@@ -1819,12 +1819,12 @@ suite('types', function () {
           {name: 'age', aliases: ['years'], type: {type: 'int'}}
         ]
       });
-      assert.strictEqual(t.getName(), 'earth.Person');
-      assert.strictEqual(t.getName(true), 'earth.Person');
+      assert.strictEqual(t.name, 'earth.Person');
+      assert.strictEqual(t.branchName, 'earth.Person');
       assert.equal(t.typeName, 'record');
     });
 
-    test('getSchema', function () {
+    test('schema', function () {
       var t = Type.forSchema({
         type: 'record',
         name: 'Person',
@@ -1844,9 +1844,9 @@ suite('types', function () {
         ]
       });
       var schemaStr = '{"name":"earth.Person","type":"record","fields":[{"name":"friends","type":{"type":"array","items":"string"}},{"name":"age","type":"int"}]}';
-      assert.equal(JSON.stringify(t.getSchema()), schemaStr);
-      assert.deepEqual(t.getSchema(), JSON.parse(schemaStr));
-      assert.deepEqual(t.getSchema({exportAttrs: true}), {
+      assert.equal(JSON.stringify(t.schema()), schemaStr);
+      assert.deepEqual(t.schema(), JSON.parse(schemaStr));
+      assert.deepEqual(t.schema({exportAttrs: true}), {
         type: 'record',
         name: 'earth.Person',
         aliases: ['earth.Human'],
@@ -1862,10 +1862,10 @@ suite('types', function () {
           }
         ]
       });
-      assert.equal(t.getSchema({noDeref: true}), 'earth.Person');
+      assert.equal(t.schema({noDeref: true}), 'earth.Person');
     });
 
-    test('getSchema recursive schema', function () {
+    test('schema recursive schema', function () {
       var t = Type.forSchema({
         type: 'record',
         name: 'Person',
@@ -1875,11 +1875,11 @@ suite('types', function () {
         ]
       });
       assert.equal(
-        JSON.stringify(t.getSchema()),
+        JSON.stringify(t.schema()),
         '{"name":"earth.Person","type":"record","fields":[{"name":"friends","type":{"type":"array","items":"earth.Person"}}]}'
       );
       assert.equal(
-        JSON.stringify(t.getSchema({noDeref: true})),
+        JSON.stringify(t.schema({noDeref: true})),
         '"earth.Person"'
       );
     });
@@ -2010,7 +2010,7 @@ suite('types', function () {
       var o = {name: 'Ann'};
       assert.deepEqual(t.clone(o), o);
       assert.deepEqual(t.clone({}), {name: 'Bob'});
-      assert.deepEqual(t.getSchema({exportAttrs: true}), schema);
+      assert.deepEqual(t.schema({exportAttrs: true}), schema);
     });
 
     test('wrapped union field default', function () {
@@ -2034,7 +2034,7 @@ suite('types', function () {
       var o = {name: {string: 'Ann'}};
       assert.deepEqual(t.clone(o), o);
       assert.deepEqual(t.clone({}), {name: {string: 'Bob'}});
-      assert.deepEqual(t.getSchema({exportAttrs: true}), schema);
+      assert.deepEqual(t.schema({exportAttrs: true}), schema);
     });
 
     test('get full name & aliases', function () {
@@ -2044,8 +2044,8 @@ suite('types', function () {
         namespace: 'a',
         fields: [{name: 'age', type: 'int'}, {name: 'name', type: 'string'}]
       });
-      assert.equal(t.getName(), 'a.Person');
-      assert.deepEqual(t.getAliases(), []);
+      assert.equal(t.name, 'a.Person');
+      assert.deepEqual(t.aliases, []);
     });
 
     test('field getters', function () {
@@ -2058,12 +2058,12 @@ suite('types', function () {
           {name: 'name', type: 'string', aliases: ['word'], namespace: 'b'}
         ]
       });
-      assert.equal(t.getField('age').getName(), 'age');
+      assert.equal(t.getField('age').name, 'age');
       assert.strictEqual(t.getField('foo'), undefined);
       var fields = t.getFields();
-      assert.deepEqual(fields[0].getAliases(), []);
-      assert.deepEqual(fields[1].getAliases(), ['word']);
-      assert.equal(fields[1].getName(), 'name'); // Namespaces are ignored.
+      assert.deepEqual(fields[0].aliases, []);
+      assert.deepEqual(fields[1].aliases, ['word']);
+      assert.equal(fields[1].name, 'name'); // Namespaces are ignored.
       assert(fields[1].getType().equals(Type.forSchema('string')));
     });
 
@@ -2284,7 +2284,7 @@ suite('types', function () {
           {name: 'id', type: {type: 'record', name: 'Bar', fields: []}}
         ]
       }, {namespace: 'bar'});
-      assert.equal(t.getField('id').getType().getName(), 'Bar');
+      assert.equal(t.getField('id').getType().name, 'Bar');
     });
 
   });
@@ -2495,13 +2495,13 @@ suite('types', function () {
       var d = new Date(123);
       assert.equal(t.toString(d), '123');
       assert.deepEqual(t.wrap(d), {long: d});
-      assert.strictEqual(t.getName(), undefined);
-      assert.equal(t.getName(true), 'long');
+      assert.strictEqual(t.name, undefined);
+      assert.equal(t.branchName, 'long');
       assert.equal(t.typeName, 'logical:date');
       assert.deepEqual(t.fromString('123'), d);
       assert.deepEqual(t.clone(d), d);
       assert.equal(t.compare(d, d), 0);
-      assert.equal(t.getSchema(), 'long');
+      assert.equal(t.schema(), 'long');
     });
 
     test('invalid type', function () {
@@ -2598,7 +2598,7 @@ suite('types', function () {
       assert(p2 instanceof Person);
       assert(p2.friends[0] instanceof Person);
       assert.deepEqual(p2, p1);
-      assert.deepEqual(t.getSchema({exportAttrs: true}), schema);
+      assert.deepEqual(t.schema({exportAttrs: true}), schema);
     });
 
     test('resolve underlying > logical', function () {
@@ -2651,9 +2651,9 @@ suite('types', function () {
       assert.equal(t.fromBuffer(new Buffer([4])), 2);
       assert.equal(t.clone(4), 4);
       assert.equal(t.fromString('6'), 6);
-      assert.equal(t.getSchema(), 'long');
+      assert.equal(t.schema(), 'long');
       assert.deepEqual(
-        JSON.stringify(t.getSchema({exportAttrs: true})),
+        JSON.stringify(t.schema({exportAttrs: true})),
         '{"type":"long","logicalType":"even-integer"}'
       );
       assert(types.Type.isType(t));
@@ -2806,7 +2806,7 @@ suite('types', function () {
         function OptionalType(schema, opts) {
           LogicalType.call(this, schema, opts);
           var type = this.getUnderlyingType().getTypes()[1];
-          this.name = type.getName(true);
+          this.name = type.branchName;
         }
         util.inherits(OptionalType, LogicalType);
 
@@ -3013,7 +3013,7 @@ suite('types', function () {
       };
       Type.forSchema(o, {typeHook: hook});
       assert.equal(ts.length, 1);
-      assert.equal(ts[0].getName(), 'Human');
+      assert.equal(ts[0].name, 'Human');
 
       function hook(schema, opts) {
         if (~refs.indexOf(schema)) {
@@ -3071,7 +3071,7 @@ suite('types', function () {
       assert.deepEqual(t.fingerprint(), buf);
     });
 
-    test('getSchema default', function () {
+    test('schema default', function () {
       var type = Type.forSchema({
         type: 'record',
         name: 'Human',
@@ -3081,7 +3081,7 @@ suite('types', function () {
         ]
       });
       assert.deepEqual(
-        type.getSchema(),
+        type.schema(),
         {
           type: 'record',
           name: 'Human',
@@ -3286,8 +3286,8 @@ suite('types', function () {
           }
         ]
       });
-      assert.equal(type.getName(), 'Person');
-      assert.equal(type.fields[0].type.getName(), 'earth.Gender');
+      assert.equal(type.name, 'Person');
+      assert.equal(type.fields[0].type.name, 'earth.Gender');
     });
 
     test('redefining', function () {
@@ -3363,7 +3363,7 @@ suite('types', function () {
         {type: 'record', fields: [{name: 'foo', type: 'string'}]}
       ]);
       assert.equal(
-        JSON.stringify(t.getSchema()),
+        JSON.stringify(t.schema()),
         '[{"type":"enum","symbols":["A"]},"int",{"type":"record","fields":[{"name":"foo","type":"string"}]}]'
       );
     });
@@ -3539,7 +3539,7 @@ suite('types', function () {
       });
       var t3 = combine([t1, t2], {strictDefaults: true});
       assert.deepEqual(
-        t3.getSchema({exportAttrs: true}),
+        t3.schema({exportAttrs: true}),
         {
           type: 'record',
           fields: [
@@ -3560,7 +3560,7 @@ suite('types', function () {
       });
       var t3 = combine([t1, t2], {strictDefaults: true});
       assert.deepEqual(
-        t3.getSchema({exportAttrs: true}),
+        t3.schema({exportAttrs: true}),
         {
           type: 'record',
           fields: [
@@ -3583,7 +3583,7 @@ suite('types', function () {
       var t3;
       t3 = combine([t1, t2]);
       assert.deepEqual(
-        t3.getSchema({exportAttrs: true}),
+        t3.schema({exportAttrs: true}),
         {
           type: 'record',
           fields: [
@@ -3700,7 +3700,7 @@ suite('types', function () {
       var t3 = Type.forSchema(['string'], opts);
       var t4 = combine([t1, t2, t3]);
       assert.deepEqual(
-        t4.getSchema(),
+        t4.schema(),
         ['null', 'int', 'long', 'string']
       );
     });
@@ -3724,7 +3724,7 @@ suite('types', function () {
     test('record', function () {
       var t = infer({b: true, n: null, s: '', f: new Buffer(0)});
       assert.deepEqual(
-        t.getSchema(),
+        t.schema(),
         {
           type: 'record',
           fields: [

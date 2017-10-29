@@ -47,20 +47,10 @@ suite('services', function () {
       };
       var s = Service.forProtocol(p);
       assert.equal(s.name, 'foo.HelloWorld');
-      assert.equal(s.type('foo.Greeting').getTypeName(), 'record');
-      assert.equal(s.type('string').getTypeName(), 'string');
+      assert.equal(s.type('foo.Greeting').typeName, 'record');
+      assert.equal(s.type('string').typeName, 'string');
       assert.equal(s.types.length, 4);
       assert.deepEqual(s.protocol, p);
-    });
-
-    test('missing message', function () {
-      var svc = Service.forProtocol({
-        namespace: 'com.acme',
-        protocol: 'Hello'
-      });
-      assert.throws(function () {
-        svc.on('add', function () {});
-      }, /unknown/);
     });
 
     test('missing name', function () {
@@ -108,9 +98,9 @@ suite('services', function () {
           }
         ]
       }, {typeHook: hook});
-      assert.equal(s.type('ping.Ping').getTypeName(), 'record');
-      assert.equal(s.type('ping.Pong').getTypeName(), 'record');
-      assert.equal(s.type('ping.Pung').getTypeName(), 'record');
+      assert.equal(s.type('ping.Ping').typeName, 'record');
+      assert.equal(s.type('ping.Pong').typeName, 'record');
+      assert.equal(s.type('ping.Pung').typeName, 'record');
       assert.equal(n, 5);
 
       function hook() { n++; }
@@ -147,32 +137,8 @@ suite('services', function () {
       assert.deepEqual(messages, [svc.message('ping')]);
     });
 
-    test('subprotocol', function () {
-      var svc = Service.forProtocol({
-        namespace: 'com.acme',
-        protocol: 'Hello',
-        types: [{name: 'Id', type: 'fixed', size: 2}],
-        messages: {ping: {request: [], response: 'null'}}
-      });
-      var subptcl = svc.subprotocol();
-      assert(subptcl.getFingerprint().equals(svc.getFingerprint()));
-      assert.strictEqual(subptcl._emitterResolvers, svc._emitterResolvers);
-      assert.strictEqual(subptcl._listenerResolvers, svc._listenerResolvers);
-    });
-
-    test('invalid emitter', function (done) {
-      var svc1 = Service.forProtocol({protocol: 'Hey'});
-      var svc2 = Service.forProtocol({protocol: 'Hi'});
-      var ee = svc2.createEmitter(new stream.PassThrough(), {noPing: true});
-      assert.throws(
-        function () { svc1.emit('hi', {}, ee); },
-        /invalid emitter/
-      );
-      done();
-    });
-
-    test('getSchema', function () {
-      var schema = {
+    test('protocol', function () {
+      var protocol = {
         protocol: 'Hello',
         messages: {
           ping: {request: [], response: 'boolean', doc: ''},
@@ -180,40 +146,13 @@ suite('services', function () {
         },
         doc: 'Hey'
       };
-      var svc = Service.forProtocol(schema);
-      assert.deepEqual(svc.getSchema({exportAttrs: true}), schema);
-    });
-
-    test('getSchema no top-level type references', function () {
-      var schema = {
-        protocol: 'Hello',
-        types: [
-          {
-            type: 'record',
-            name: 'Foo',
-            fields: [
-              {name: 'bar', type: {type: 'fixed', name: 'Bar', size: 4}}
-            ]
-          }
-        ]
-      };
-      var svc = Service.forProtocol(schema);
-      var t = svc.type('Foo');
-      // Bar's reference shouldn't be included in the returned types array.
-      assert.deepEqual(svc.getSchema().types, [t.getSchema()]);
+      var svc = Service.forProtocol(protocol);
+      assert.deepEqual(svc.protocol, protocol);
     });
 
     test('get documentation', function () {
       var svc = Service.forProtocol({protocol: 'Hello', doc: 'Hey'});
       assert.equal(svc.doc, 'Hey');
-    });
-
-    test('getFingerprint', function () {
-      var svc = Service.forProtocol({
-        namespace: 'hello',
-        protocol: 'World',
-      });
-      assert.deepEqual(svc.getFingerprint('md5'), svc.getFingerprint());
     });
 
     test('isService', function () {
@@ -224,16 +163,6 @@ suite('services', function () {
       assert(Service.isService(svc));
       assert(!Service.isService(undefined));
       assert(!Service.isService({protocol: 'bar'}));
-    });
-
-    test('equals', function () {
-      var svc = Service.forProtocol({
-        namespace: 'hello',
-        protocol: 'World',
-      });
-      assert(svc.equals(svc));
-      assert(!svc.equals(undefined));
-      assert(!svc.equals(Service.forProtocol({protocol: 'Foo'})));
     });
 
     test('inspect', function () {
@@ -396,10 +325,9 @@ suite('services', function () {
       };
       var m = Message.forSchema('Ping', s);
       assert.equal(m.name, 'Ping');
-      assert.equal(m.requestType.getFields()[0].getName(), 'ping');
-      assert.equal(m.responseType.getName(true), 'null');
+      assert.equal(m.requestType.getFields()[0].name, 'ping');
+      assert.equal(m.responseType.branchName, 'null');
       assert.strictEqual(m.oneWay, false);
-      assert.strictEqual(m.isOneWay(), false);
       assert.deepEqual(m.schema(), s);
     });
 
@@ -808,7 +736,6 @@ suite('services', function () {
       var server2 = svc2.createServer()
         .onPing(function (cb) { cb(null, true); });
       var chn1 = server2.createChannel(transports[0]);
-      assert.strictEqual(chn1.getProtocol(), svc2); // Deprecated.
       assert.strictEqual(chn1.server.service, svc2);
       svc1.createClient()
         .createChannel(transports[1], {endWritable: false})
@@ -860,7 +787,6 @@ suite('services', function () {
       client.ping(function (err) {
         assert(/foobar/.test(err.string), err);
         assert(!chn.destroyed);
-        assert(!chn.isDestroyed()); // Deprecated.
         done();
       });
     });
@@ -875,7 +801,6 @@ suite('services', function () {
       client.ping(function (err) {
         assert(/invalid writable stream/.test(err), err);
         assert(!chn.destroyed);
-        assert(!chn.isDestroyed()); // Deprecated.
         done();
       });
     });
@@ -1016,7 +941,6 @@ suite('services', function () {
       var transport = new stream.PassThrough();
       svc.createServer().createChannel(transport).on('eot', function () {
         assert(this.destroyed);
-        assert(this.isDestroyed()); // Deprecated.
         done();
       });
       transport.push(null);
@@ -1032,7 +956,6 @@ suite('services', function () {
         .on('eot', function (pending, err) {
           assert(/trailing/.test(err), err);
           assert(this.destroyed);
-          assert(this.isDestroyed()); // Deprecated.
           done();
         });
       transport.end(new Buffer([48]));
@@ -1114,11 +1037,9 @@ suite('services', function () {
 
     test('reuse writable', function (done) {
       var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'null'}}
-      }).on('ping', function (req, ee, cb) {
-        cb(null, null);
-      });
+          protocol: 'Ping',
+          messages: {ping: {request: [], response: 'null'}}
+        });
       var payload = [
         services.HANDSHAKE_REQUEST_TYPE.toBuffer({
           clientHash: svc.hash,
@@ -1130,10 +1051,12 @@ suite('services', function () {
       var readable = new stream.PassThrough({objectMode: true});
       var writable = new stream.PassThrough({objectMode: true})
         .on('data', function (obj) { objs.push(obj); });
-      svc.createServer({silent: true}).createChannel(function (cb) {
-        cb(null, writable);
-        return readable;
-      }, {endWritable: false, noPing: true, objectMode: true})
+      svc.createServer({silent: true})
+        .onPing(function (cb) { cb(null, null); })
+        .createChannel(function (cb) {
+          cb(null, writable);
+          return readable;
+        }, {endWritable: false, noPing: true, objectMode: true})
         .on('eot', function () {
           assert.deepEqual(objs.length, 2);
           done();
@@ -1141,835 +1064,6 @@ suite('services', function () {
       readable.write({id: 0, payload: payload});
       readable.end({id: 1, payload: payload});
     });
-  });
-
-  suite('emitters & listeners', function () { // <5.0 API.
-
-    suite('stateful', function () {
-
-      run(function (emitterPtcl, listenerPtcl, opts, cb) {
-        if (!cb) {
-          cb = opts;
-          opts = undefined;
-        }
-        var pt1 = new stream.PassThrough();
-        var pt2 = new stream.PassThrough();
-        cb(
-          emitterPtcl.createEmitter({readable: pt1, writable: pt2}, opts),
-          listenerPtcl.createListener({readable: pt2, writable: pt1}, opts)
-        );
-      });
-
-      test('explicit server fingerprint', function (done) {
-        var transports = createPassthroughTransports();
-        var p1 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'long'
-            }
-          }
-        });
-        var p2 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'long'}],
-              response: 'int'
-            }
-          }
-        });
-        var ml1 = p2.createListener(transports[0]);
-        var me1 = p1.createEmitter(transports[1]);
-        me1.on('handshake', function (hreq, hres) {
-          if (hres.match === 'NONE') {
-            return;
-          }
-          // When we reach here a connection has been established, so both
-          // emitter and listener caches have been populated with correct
-          // adapters.
-          var transports = createPassthroughTransports();
-          p2.createListener(transports[0], {cache: ml1.getCache()})
-            .once('handshake', onHandshake);
-          p1.createEmitter(transports[1], {
-            cache: me1.getCache(),
-            serverHash: p2.hash
-          }).once('handshake', onHandshake);
-
-          var n = 0;
-          function onHandshake(hreq, hres) {
-            // The remote service should be available.
-            assert.equal(hres.match, 'BOTH');
-            if (++n === 2) {
-              done();
-            }
-          }
-        });
-      });
-
-      test('cached client fingerprint', function (done) {
-        var transports = createPassthroughTransports();
-        var p1 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'long'
-            }
-          }
-        });
-        var p2 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'long'}],
-              response: 'int'
-            }
-          }
-        });
-        var ml1 = p2.createListener(transports[0]);
-        var me1 = p1.createEmitter(transports[1], {timeout: 0});
-        me1.on('handshake', function (hreq, hres) {
-          if (hres.match === 'NONE') {
-            return;
-          }
-          var transports = createPassthroughTransports();
-          // The listener now has the client's service.
-          p2.createListener(transports[0], {cache: ml1.getCache()})
-            .once('handshake', function (hreq, hres) {
-              assert.equal(hres.match, 'CLIENT');
-              done();
-            });
-          p1.createEmitter(transports[1]);
-        });
-      });
-
-      test('scoped transports', function (done) {
-        var transports = createPassthroughTransports();
-        var ptcl = Service.forProtocol({
-          protocol: 'Case',
-          messages: {
-            upper: {
-              request: [{name: 'str', type: 'string'}],
-              response: 'string'
-            }
-          }
-        }).on('upper', function (req, ee, cb) {
-          cb(null, req.str.toUpperCase());
-        });
-        var meA = ptcl.createEmitter(transports[1], {scope: 'a'});
-        ptcl.createListener(transports[0], {scope: 'a'});
-        var meB = ptcl.createEmitter(transports[0], {scope: 'b'});
-        ptcl.createListener(transports[1], {scope: 'b'});
-        ptcl.emit('upper', {str: 'hi'}, meA, function (err, res) {
-          assert.strictEqual(err, null);
-          assert.equal(res, 'HI');
-          ptcl.emit('upper', {str: 'hey'}, meB, function (err, res) {
-            assert.strictEqual(err, null);
-            assert.equal(res, 'HEY');
-            done();
-          });
-        });
-      });
-
-    });
-
-    suite('stateless', function () {
-
-      run(function (emitterPtcl, listenerPtcl, opts, cb) {
-        if (!cb) {
-          cb = opts;
-          opts = undefined;
-        }
-        cb(emitterPtcl.createEmitter(writableFactory, opts));
-
-        function writableFactory(emitterCb) {
-          var reqPt = new stream.PassThrough()
-            .on('finish', function () {
-              listenerPtcl.createListener(function (listenerCb) {
-                var resPt = new stream.PassThrough()
-                  .on('finish', function () { emitterCb(null, resPt); });
-                listenerCb(null, resPt);
-                return reqPt;
-              }, opts);
-            });
-          return reqPt;
-        }
-      });
-
-    });
-
-    function run(setupFn) {
-
-      test('primitive types', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'long'
-            }
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.on('negate', function (req, ee, cb) { cb(null, -req.n); });
-          var n1, n2;
-          ee.on('eot', function () {
-            assert.equal(n1, 1);
-            assert.equal(n2, 1);
-            done();
-          }).once('handshake', function (hreq, hres) {
-            // Allow the initial ping to complete.
-            assert.equal(hres.match, 'BOTH');
-            setTimeout(function () {
-              // Also let the pending count go down.
-              n1 = ptcl.emit('negate', {n: 20}, ee, function (err, res) {
-                assert.equal(this, ptcl);
-                assert.strictEqual(err, null);
-                assert.equal(res, -20);
-                n2 = this.emit('negate', {n: 'hi'}, ee, function (err) {
-                  assert(/invalid "negate" request/.test(err), err);
-                  process.nextTick(function () { ee.destroy(); });
-                });
-              });
-            }, 0);
-          });
-        });
-      });
-
-      test('emit receive error', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'long',
-              errors: [{type: 'map', values: 'string'}]
-            }
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ee.on('eot', function () { done(); });
-          ptcl.on('negate', function (req, ee, cb) { cb({rate: '23'}); });
-          ptcl.emit('negate', {n: 20}, ee, function (err) {
-            assert.equal(this, ptcl);
-            assert.deepEqual(err, {rate: '23'});
-            ee.destroy();
-          });
-        });
-      });
-
-      test('complex type', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Literature',
-          messages: {
-            generate: {
-              request: [{name: 'n', type: 'int'}],
-              response: {
-                type: 'array',
-                items: {
-                  name: 'N',
-                  type: 'enum',
-                  symbols: ['A', 'B']
-                }
-              }
-            }
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          var type = ptcl.getType('N');
-          ee.on('eot', function () { done(); });
-          ptcl.on('generate', function (req, ee, cb) {
-            var letters = [];
-            while (req.n--) { letters.push(type.random()); }
-            cb(null, letters);
-          });
-          ptcl.emit('generate', {n: 20}, ee, function (err, res) {
-            assert.equal(this, ptcl);
-            assert.strictEqual(err, null);
-            assert.equal(res.length, 20);
-            ee.destroy();
-          });
-        });
-      });
-
-      test('invalid request', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'int'
-            }
-          }
-        }).on('negate', function () { assert(false); });
-        setupFn(ptcl, ptcl, function (ee) {
-          ee.on('eot', function () { done(); });
-          ptcl.emit('negate', {n: 'a'}, ee, function (err) {
-            assert(/invalid "negate" request/.test(err), err);
-            ee.destroy();
-          });
-        });
-      });
-
-      test('error response', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            sqrt: {
-              request: [{name: 'n', type: 'float'}],
-              response: 'float'
-            }
-          }
-        }).on('sqrt', function (req, ee, cb) {
-          var n = req.n;
-          if (n < 0) {
-            cb(new Error('must be non-negative'));
-          } else {
-            cb(null, Math.sqrt(n));
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.emit('sqrt', {n: 100}, ee, function (err, res) {
-            assert(Math.abs(res - 10) < 1e-5);
-            ptcl.emit('sqrt', {n: - 10}, ee, function (err) {
-              assert.equal(this, ptcl);
-              assert(/must be non-negative/.test(err.message));
-              done();
-            });
-          });
-        });
-      });
-
-      test('wrapped error response', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            sqrt: {
-              request: [{name: 'n', type: 'float'}],
-              response: 'null',
-              errors: ['float']
-            }
-          }
-        }, {wrapUnions: true}).on('sqrt', function (req, ee, cb) {
-          var n = req.n;
-          if (n < 0) {
-            cb(new Error('must be non-negative'));
-          } else {
-            cb({float: Math.sqrt(n)});
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.emit('sqrt', {n: -10}, ee, function (err) {
-            assert(/must be non-negative/.test(err.message), err);
-            ptcl.emit('sqrt', {n: 100}, ee, function (err) {
-              assert(Math.abs(err.float - 10) < 1e-5);
-              done();
-            });
-          });
-        });
-      });
-
-      test('wrapped remote service', function (done) {
-        var ptcl1 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            invert: {
-              request: [{name: 'n', type: ['int', 'float']}],
-              response: ['int', 'float']
-            }
-          }
-        }, {wrapUnions: true});
-        var ptcl2 = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            invert: {
-              request: [{name: 'n', type: ['int', 'float']}],
-              response: ['float', 'int']
-            }
-          }
-        }, {wrapUnions: true}).on('invert', function (req, ee, cb) {
-          if (req.n.int) {
-            cb(null, {float: 1 / req.n.int});
-          } else {
-            cb(null, {int: (1 / req.n.float) | 0});
-          }
-        });
-        setupFn(ptcl1, ptcl2, function (ee) {
-          ptcl1.emit('invert', {n: {int: 10}}, ee, function (err, res) {
-            assert(Math.abs(res.float - 0.1) < 1e-5);
-            ptcl1.emit('invert', {n: {float: 10}}, ee, function (err, res) {
-              assert.equal(res.int, 0);
-              done();
-            });
-          });
-        });
-      });
-
-      test('invalid response', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            sqrt: {
-              request: [{name: 'n', type: 'float'}],
-              response: 'float'
-            }
-          }
-        }).on('sqrt', function (req, ee, cb) {
-          var n = req.n;
-          if (n < 0) {
-            cb(null, 'complex'); // Invalid response.
-          } else if (n === 0) {
-            cb(new Error('zero!')); // Ok error response.
-          } else {
-            cb(null, Math.sqrt(n));
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.emit('sqrt', {n: - 10}, ee, function (err) {
-            assert(/internal server error/.test(err), err);
-            ptcl.emit('sqrt', {n: 0}, ee, function (err) {
-              assert(/zero!/.test(err.message));
-              ptcl.emit('sqrt', {n: 100}, ee, function (err, res) {
-                // And the server doesn't die (we can make a new request).
-                assert(Math.abs(res - 10) < 1e-5);
-                done();
-              });
-            });
-          });
-        });
-      });
-
-      test('out of order', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Delay',
-          messages: {
-            w: {
-              request: [
-                {name: 'ms', type: 'float'},
-                {name: 'id', type: 'string'}
-              ],
-              response: 'string'
-            }
-          }
-        }).on('w', function (req, ee, cb) {
-          var delay = req.ms;
-          if (delay < 0) {
-            cb('delay must be non-negative');
-            return;
-          }
-          setTimeout(function () { cb(null, req.id); }, delay);
-        });
-        var ids = [];
-        setupFn(ptcl, ptcl, function (ee) {
-          var n1, n2, n3;
-          ee.on('eot', function (pending) {
-            assert.equal(pending, 0);
-            assert.equal(n1, 1);
-            assert.equal(n2, 2);
-            assert.equal(n3, 3);
-            assert.deepEqual(ids, [undefined, 'b', 'a']);
-            done();
-          }).once('handshake', function (hreq, hres) {
-            assert.equal(hres.match, 'BOTH');
-            process.nextTick(function () {
-              n1 = ptcl.emit('w', {ms: 500, id: 'a'}, ee, function (err, res) {
-                assert.strictEqual(err, null);
-                ids.push(res);
-              });
-              n2 = ptcl.emit('w', {ms: 10, id: 'b'}, ee, function (err, res) {
-                assert.strictEqual(err, null);
-                ids.push(res);
-                ee.destroy();
-              });
-              n3 = ptcl.emit('w', {ms: -10, id: 'c'}, ee, function (err, res) {
-                assert(/non-negative/.test(err));
-                ids.push(res);
-              });
-            });
-          });
-        });
-      });
-
-      test('compatible services', function (done) {
-        var emitterPtcl = Service.forProtocol({
-          protocol: 'emitterService',
-          messages: {
-            age: {
-              request: [{name: 'name', type: 'string'}],
-              response: 'long'
-            }
-          }
-        });
-        var listenerPtcl = Service.forProtocol({
-          protocol: 'serverService',
-          messages: {
-            age: {
-              request: [
-                {name: 'name', type: 'string'},
-                {name: 'address', type: ['null', 'string'], 'default': null}
-              ],
-              response: 'int'
-            },
-            id: {
-              request: [{name: 'name', type: 'string'}],
-              response: 'long'
-            }
-          }
-        });
-        setupFn(
-          emitterPtcl,
-          listenerPtcl,
-          function (ee) {
-            listenerPtcl.on('age', function (req, ee, cb) {
-              assert.equal(req.name, 'Ann');
-              cb(null, 23);
-            });
-            emitterPtcl.emit('age', {name: 'Ann'}, ee, function (err, res) {
-              assert.strictEqual(err, null);
-              assert.equal(res, 23);
-              done();
-            });
-          }
-        );
-      });
-
-      test('compatible service with a complex type', function (done) {
-        var ptcl1 = Service.forProtocol({
-          protocol: 'Literature',
-          messages: {
-            generate: {
-              request: [{name: 'n', type: 'int'}],
-              response: {
-                type: 'array',
-                items: {
-                  name: 'N',
-                  aliases: ['N2'],
-                  type: 'enum',
-                  symbols: ['A', 'B', 'C', 'D']
-                }
-              }
-            }
-          }
-        });
-        var ptcl2 = Service.forProtocol({
-          protocol: 'Literature',
-          messages: {
-            generate: {
-              request: [{name: 'n', type: 'int'}],
-              response: {
-                type: 'array',
-                items: {
-                  name: 'N2',
-                  aliases: ['N'],
-                  type: 'enum',
-                  symbols: ['A', 'B']
-                }
-              }
-            }
-          }
-        });
-        setupFn(ptcl1, ptcl2, function (ee) {
-          var type = ptcl2.getType('N2');
-          ee.on('eot', function () { done(); });
-          ptcl2.on('generate', function (req, ee, cb) {
-            var letters = [];
-            while (req.n--) { letters.push(type.random()); }
-            cb(null, letters);
-          });
-          ptcl1.emit('generate', {n: 20}, ee, function (err, res) {
-            assert.equal(this, ptcl1);
-            assert.strictEqual(err, null);
-            assert.equal(res.length, 20);
-            ee.destroy();
-          });
-        });
-      });
-
-      test('cached compatible services', function (done) {
-        var ptcl1 = Service.forProtocol({
-          protocol: 'emitterService',
-          messages: {
-            age: {
-              request: [{name: 'name', type: 'string'}],
-              response: 'long'
-            }
-          }
-        });
-        var ptcl2 = Service.forProtocol({
-          protocol: 'serverService',
-          namespace: 'foo',
-          messages: {
-            age: {
-              request: [
-                {name: 'name', type: 'string'},
-                {name: 'address', type: ['null', 'string'], 'default': null}
-              ],
-              response: 'int'
-            },
-            id: {
-              request: [{name: 'name', type: 'string'}],
-              response: 'long'
-            }
-          }
-        }).on('age', function (req, ee, cb) { cb(null, 48); });
-        setupFn(
-          ptcl1,
-          ptcl2,
-          function (ee1) {
-            ptcl1.emit('age', {name: 'Ann'}, ee1, function (err, res) {
-              assert.equal(res, 48);
-              setupFn(
-                ptcl1,
-                ptcl2,
-                function (ee2) { // ee2 has the server's service.
-                  ptcl1.emit('age', {name: 'Bob'}, ee2, function (err, res) {
-                    assert.equal(res, 48);
-                    done();
-                  });
-                }
-              );
-            });
-          }
-        );
-      });
-
-      test('incompatible services missing message', function (done) {
-        var emitterPtcl = Service.forProtocol({
-          protocol: 'emitterService',
-          messages: {
-            age: {request: [{name: 'name', type: 'string'}], response: 'long'}
-          }
-        }, {wrapUnions: true});
-        var listenerPtcl = Service.forProtocol({protocol: 'serverService'});
-        setupFn(
-          emitterPtcl,
-          listenerPtcl,
-          function (ee) {
-            ee.on('error', function () {}); // For stateful services.
-            emitterPtcl.emit('age', {name: 'Ann'}, ee, function (err) {
-              assert(err.message);
-              done();
-            });
-          }
-        );
-      });
-
-      test('incompatible services', function (done) {
-        var emitterPtcl = Service.forProtocol({
-          protocol: 'emitterService',
-          messages: {
-            age: {request: [{name: 'name', type: 'string'}], response: 'long'}
-          }
-        }, {wrapUnions: true});
-        var listenerPtcl = Service.forProtocol({
-          protocol: 'serverService',
-          messages: {
-            age: {request: [{name: 'name', type: 'int'}], response: 'long'}
-          }
-        }).on('age', function (req, ee, cb) { cb(null, 0); });
-        setupFn(
-          emitterPtcl,
-          listenerPtcl,
-          function (ee) {
-            ee.on('error', function () {}); // For stateful services.
-            emitterPtcl.emit('age', {name: 'Ann'}, ee, function (err) {
-              assert(err.message);
-              done();
-            });
-          }
-        );
-      });
-
-      test('incompatible services one way message', function (done) {
-        var ptcl1 = Service.forProtocol({
-          protocol: 'ptcl1',
-          messages: {ping: {request: [], response: 'null', 'one-way': true}}
-        });
-        var ptcl2 = Service.forProtocol({
-          protocol: 'ptcl2',
-          messages: {ping: {request: [], response: 'null'}}
-        });
-        setupFn(ptcl1, ptcl2, function (ee) {
-            ee.on('error', function (err) {
-              // This will be called twice for stateful emitters: once when
-              // interrupted, then for the incompatible service error.
-              assert(err);
-              this.destroy();
-            }).on('eot', function () { done(); });
-            ptcl1.emit('ping', {}, ee);
-          }
-        );
-      });
-
-      test('one way message', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'ptcl',
-          messages: {ping: {request: [], response: 'null', 'one-way': true}}
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.on('ping', function (req, ee, cb) {
-            assert.strictEqual(cb, undefined);
-            done();
-          });
-          ptcl.emit('ping', {}, ee);
-        });
-      });
-
-      test('ignored response', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'ptcl',
-          messages: {ping: {request: [], response: 'null'}} // Not one-way.
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.on('ping', function (req, ee, cb) {
-            cb(null, null);
-            done();
-          });
-          ptcl.emit('ping', {}, ee);
-        });
-      });
-
-      test('duplicate message callback', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'ptcl',
-          messages: {ping: {request: [], response: 'null'}} // Not one-way.
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.on('ping', function (req, ee, cb) {
-            // In reality the server wouldn't be used (since this is the old
-            // API), but this makes this test do its job.
-            ee.server.on('error', function (err) {
-              assert(/duplicate handler call/.test(err), err);
-              done();
-            });
-            cb(null, null);
-            cb(null, null);
-          });
-          ptcl.emit('ping', {}, ee); // No error on the emitter side.
-        });
-      });
-
-      test('unknown message', function (done) {
-        var ptcl = Service.forProtocol({protocol: 'Empty'});
-        setupFn(ptcl, ptcl, function (ee) {
-          assert.throws(
-            function () { ptcl.emit('echo', {}, ee); },
-            /unknown message/
-          );
-          done();
-        });
-      });
-
-      test('unhandled message', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Echo',
-          messages: {
-            echo: {
-              request: [{name: 'id', type: 'string'}],
-              response: 'string'
-            },
-            ping: {request: [], response: 'null', 'one-way': true}
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.emit('echo', {id: ''}, ee, function (err) {
-            assert(/not implemented/.test(err), err);
-            done();
-          });
-        });
-      });
-
-      test('destroy emitter noWait', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Delay',
-          messages: {
-            wait: {
-              request: [{name: 'ms', type: 'int'}],
-              response: 'string'
-            }
-          }
-        }).on('wait', function (req, ee, cb) {
-            setTimeout(function () { cb(null, 'ok'); }, req.ms);
-          });
-        var interrupted = 0;
-        setupFn(ptcl, ptcl, function (ee) {
-          ee.on('eot', function (pending) {
-            assert.equal(pending, 2);
-            setTimeout(function () {
-              assert.equal(interrupted, 2);
-              done();
-            }, 5);
-          });
-          ptcl.emit('wait', {ms: 75}, ee, interruptedCb);
-          ptcl.emit('wait', {ms: 50}, ee, interruptedCb);
-          ptcl.emit('wait', {ms: 10}, ee, function (err, res) {
-            assert.equal(res, 'ok');
-            ee.destroy(true);
-          });
-
-          function interruptedCb(err) {
-            assert(/interrupted/.test(err.message));
-            interrupted++;
-          }
-        });
-      });
-
-      test('destroy emitter', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'int'
-            }
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl.on('negate', function (req, ee, cb) { cb(null, -req.n); });
-          ptcl.emit('negate', {n: 20}, ee, function (err, res) {
-            assert.strictEqual(err, null);
-            assert.equal(res, -20);
-            assert.strictEqual(ee.getProtocol(), ptcl);
-            ee.destroy();
-            this.emit('negate', {n: 'hi'}, ee, function (err) {
-              assert(/no active channels/.test(err.message), err);
-              done();
-            });
-          });
-        });
-      });
-
-
-      test('catch server error', function (done) {
-        var ptcl = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            error1: {request: [], response: 'null'},
-            negate: {
-              request: [{name: 'n', type: 'int'}],
-              response: 'int'
-            }
-          }
-        });
-        setupFn(ptcl, ptcl, function (ee) {
-          ptcl
-            .on('error1', function () { throw new Error('foobar'); })
-            .on('negate', function (req, ee, cb) { cb(null, -req.n); })
-            .emit('error1', {}, ee, function (err) {
-              assert(/internal server error/.test(err), err);
-              // But the server doesn't die.
-              this.emit('negate', {n: 20}, ee, function (err, res) {
-                assert.strictEqual(err, null);
-                assert.equal(res, -20);
-                done();
-              });
-            });
-        });
-      });
-
-    }
   });
 
   suite('Client', function () {
@@ -3149,49 +2243,6 @@ suite('services', function () {
           this.channel.destroy();
         });
       });
-    });
-
-    test('legacy stateless ok', function (done) {
-      // Using old API.
-      var schema = {
-        protocol: 'Case',
-        messages: {
-          upper: {
-            request: [{name: 'str', type: 'string'}],
-            response: 'string'
-          }
-        }
-      };
-      var svc = Service.forProtocol(schema)
-        .on('upper', function (req, ee, cb) {
-          cb(null, req.str.toUpperCase());
-        });
-      discoverProtocol(writableFactory, function (err, actual) {
-        assert.strictEqual(err, null);
-        assert.deepEqual(actual, schema);
-        // Check that the transport is still usable.
-        var me = svc.createEmitter(writableFactory).on('eot', function() {
-          done();
-        });
-        svc.emit('upper', {str: 'foo'}, me, function (err, res) {
-          assert.strictEqual(err, null);
-          assert.equal(res, 'FOO');
-          me.destroy();
-        });
-      });
-
-      function writableFactory(emitterCb) {
-        var reqPt = new stream.PassThrough()
-          .on('finish', function () {
-            svc.createListener(function (listenerCb) {
-              var resPt = new stream.PassThrough()
-                .on('finish', function () { emitterCb(null, resPt); });
-              listenerCb(null, resPt);
-              return reqPt;
-            });
-          });
-        return reqPt;
-      }
     });
 
     test('stateful wrong scope', function (done) {

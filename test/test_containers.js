@@ -598,7 +598,7 @@ suite('containers', function () {
       encoder.end();
 
       function parseHook(schema) {
-        assert.deepEqual(schema, t1.getSchema());
+        assert.deepEqual(schema, t1.schema());
         return t2;
       }
     });
