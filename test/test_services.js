@@ -781,8 +781,7 @@ suite('services', function () {
       }, {wrapUnions: true});
       var client = svc.createClient({strictTypes: true});
       var chn = client.createChannel(function (cb) {
-        return new stream.PassThrough({objectMode: true})
-          .on('finish', function () { cb(new Error('foobar')); });
+          return function () { cb(new Error('foobar')); };
       }, {noPing: true, objectMode: true});
       client.ping(function (err) {
         assert(/foobar/.test(err.string), err);
@@ -799,7 +798,7 @@ suite('services', function () {
       var client = svc.createClient();
       var chn = client.createChannel(function () {}, {noPing: true});
       client.ping(function (err) {
-        assert(/invalid writable stream/.test(err), err);
+        assert(/transport error/.test(err), err);
         assert(!chn.destroyed);
         done();
       });
@@ -847,48 +846,18 @@ suite('services', function () {
       });
     });
 
-    test('reuse writable', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'null'}}
-      });
-      var readable = new stream.PassThrough({objectMode: true});
-      var writable = new stream.PassThrough({objectMode: true})
-        .on('data', function (data) {
-          var hres = new Buffer([0, 0, 0, 0]); // Encoded handshake response.
-          var res = new Buffer([0, 0]); // Encoded response (flag and meta).
-          readable.write({id: data.id, payload: [hres, res]});
-        });
-      var client = svc.createClient();
-      client.createChannel(function (cb) {
-        cb(null, readable);
-        return writable;
-      }, {noPing: true, objectMode: true, endWritable: false});
-      client.ping(function (err) {
-        assert(!err, err);
-        client.ping(function (err) {
-          assert(!err, err); // We can reuse it.
-          done();
-        });
-      });
-    });
-
     test('invalid handshake response', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'null'}}
       });
-      var readable = new stream.PassThrough({objectMode: true});
-      var writable = new stream.PassThrough({objectMode: true})
-        .on('data', function (data) {
-          var buf = new Buffer([0, 0, 0, 2, 48]);
-          readable.write({id: data.id, payload: [buf]});
-        });
       var client = svc.createClient();
       client.createChannel(function (cb) {
-        cb(null, readable);
-        return writable;
-      }, {noPing: true, objectMode: true, endWritable: false});
+        return function (obj) {
+          var buf = new Buffer([0, 0, 0, 2, 48]);
+          cb(null, {id: obj.id, payload: [buf]});
+        };
+      }, {noPing: true, objectMode: true});
       client.ping(function (err) {
         assert(/truncated.*HandshakeResponse/.test(err), err);
         done();
@@ -906,16 +875,12 @@ suite('services', function () {
         serverService: JSON.stringify(svc.protocol),
         serverHash: svc.hash
       });
-      var readable = new stream.PassThrough({objectMode: true});
-      var writable = new stream.PassThrough({objectMode: true})
-        .on('data', function (data) {
-          readable.write({id: data.id, payload: [hres.toBuffer()]});
-        });
       var numHandshakes = 0;
       var client = svc.createClient();
       client.createChannel(function (cb) {
-        cb(null, readable);
-        return writable;
+        return function (obj) {
+          cb(null, {id: obj.id, payload: [hres.toBuffer()]});
+        };
       }, {objectMode: true}).on('handshake', function (hreq, actualHres) {
         numHandshakes++;
         assert.deepEqual(actualHres, hres);
