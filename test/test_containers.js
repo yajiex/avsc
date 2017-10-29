@@ -24,10 +24,29 @@ suite('containers', function () {
 
       var RawEncoder = streams.RawEncoder;
 
-      test('flush once', function (cb) {
+      test('flush instantly', function (cb) {
+        var t = Type.forSchema('int');
+        var ins = [1, 0, -2];
+        var outs = [2, 0, 3];
+        var encoder = new RawEncoder(t)
+          .on('data', function (buf) {
+            assert.deepEqual(buf, new Buffer([outs.shift()]));
+            if (ins.length) {
+              encoder.write(ins.shift());
+            } else {
+              encoder.end();
+            }
+          })
+          .on('end', function () {
+            cb();
+          });
+        encoder.write(ins.shift());
+      });
+
+      test('flush once when batching', function (cb) {
         var t = Type.forSchema('int');
         var buf;
-        var encoder = new RawEncoder(t)
+        var encoder = new RawEncoder(t, {batchSize: 50})
           .on('data', function (chunk) {
             assert.strictEqual(buf, undefined);
             buf = chunk;
