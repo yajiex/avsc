@@ -918,92 +918,19 @@ suite('services', function () {
 
   suite('StatelessServerChannel', function () {
 
-    test('factory error', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'boolean'}}
-      });
-      svc.createServer({silent: true}).createChannel(function (cb) {
-        cb(new Error('bar'));
-        return new stream.PassThrough();
-      }).on('eot', function (pending, err) {
-          assert(/bar/.test(err), err);
-          done();
-        });
-    });
-
     test('trailing data', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean', errors: ['int']}}
       });
       var transports = createPassthroughTransports();
-      svc.createServer({silent: true}).createChannel(function (cb) {
-        cb(null, transports[0].writable);
-        return transports[1].readable;
+      svc.createServer({silent: true}).createChannel(function (fn) {
+        fn(transports[1].readable, transports[0].writable);
       }).on('eot', function (pending, err) {
         assert(/trailing/.test(err), err);
         done();
       });
       transports[1].readable.end(new Buffer([48]));
-    });
-
-    test('delayed writable', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'boolean', errors: ['int']}}
-      });
-      var objs = [];
-      var readable = new stream.PassThrough({objectMode: true});
-      var writable = new stream.PassThrough({objectMode: true})
-        .on('data', function (obj) { objs.push(obj); });
-      svc.createServer({silent: true}).createChannel(function (cb) {
-        setTimeout(function () { cb(null, writable); }, 50);
-        return readable;
-      }, {objectMode: true}).on('eot', function () {
-        assert.deepEqual(objs.length, 1);
-        done();
-      });
-      readable.write({
-        id: 0,
-        payload: [
-          services.HANDSHAKE_REQUEST_TYPE.toBuffer({
-            clientHash: svc.hash,
-            serverHash: svc.hash
-          }),
-          new Buffer([3]) // Invalid request contents.
-        ]
-      });
-    });
-
-    test('reuse writable', function (done) {
-      var svc = Service.forProtocol({
-          protocol: 'Ping',
-          messages: {ping: {request: [], response: 'null'}}
-        });
-      var payload = [
-        services.HANDSHAKE_REQUEST_TYPE.toBuffer({
-          clientHash: svc.hash,
-          serverHash: svc.hash
-        }),
-        new Buffer('\x00\x08ping')
-      ];
-      var objs = [];
-      var readable = new stream.PassThrough({objectMode: true});
-      var writable = new stream.PassThrough({objectMode: true})
-        .on('data', function (obj) { objs.push(obj); });
-      svc.createServer({silent: true})
-        .onPing(function (cb) { cb(null, null); })
-        .createChannel(function (cb) {
-          cb(null, writable);
-          return readable;
-        }, {endWritable: false, noPing: true, objectMode: true})
-        .on('eot', function () {
-          assert.deepEqual(objs.length, 2);
-          done();
-        });
-      readable.write({id: 0, payload: payload});
-      readable.end({id: 1, payload: payload});
     });
   });
 
@@ -1581,14 +1508,13 @@ suite('services', function () {
         var server = serverPtcl.createServer(opts);
         cb(client, server);
 
-        function writableFactory(transportCt) {
+        function writableFactory(transportCb) {
           var reqPt = new stream.PassThrough()
             .on('finish', function () {
-              server.createChannel(function (channelCb) {
+              server.createChannel(function (fn) {
                 var resPt = new stream.PassThrough()
-                  .on('finish', function () { transportCt(null, resPt); });
-                channelCb(null, resPt);
-                return reqPt;
+                  .on('finish', function () { transportCb(null, resPt); });
+                fn(reqPt, resPt);
               }, opts);
             });
           return reqPt;
