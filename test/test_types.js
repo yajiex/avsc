@@ -823,6 +823,20 @@ suite('types', function () {
       function hook(path) { paths.push(path); }
     });
 
+    test('switch', function () {
+      var t = new builtins.WrappedUnionType(['null', 'int', 'long', 'string']);
+      var switches = {
+        'int': function (n) { return n + 1; },
+        'string': function (s) { return s.length; }
+      };
+      assert.equal(t.clone({'int': 2}).switch(switches), 3);
+      assert.equal(t.clone({'string': 'a'}).switch(switches), 1);
+      assert.strictEqual(t.clone({'long': 4}).switch(switches), undefined);
+      assert.strictEqual(
+        t.clone({'long': 4}).switch({}, function (v) { return v.unwrap(); }),
+        4
+      );
+    });
   });
 
   suite('EnumType', function () {
