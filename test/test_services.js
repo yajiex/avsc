@@ -325,7 +325,7 @@ suite('services', function () {
       };
       var m = Message.forSchema('Ping', s);
       assert.equal(m.name, 'Ping');
-      assert.equal(m.requestType.getFields()[0].name, 'ping');
+      assert.equal(m.requestType.fields[0].name, 'ping');
       assert.equal(m.responseType.branchName, 'null');
       assert.strictEqual(m.oneWay, false);
       assert.deepEqual(m.schema(), s);

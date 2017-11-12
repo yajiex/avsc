@@ -8,7 +8,7 @@ var containers = require('../lib/containers'),
     stream = require('stream');
 
 
-var Header = containers.HEADER_TYPE.getRecordConstructor();
+var Header = containers.HEADER_TYPE.recordConstructor;
 var MAGIC_BYTES = containers.MAGIC_BYTES;
 var SYNC = new Buffer('atokensyncheader');
 var Type = types.Type;
@@ -535,7 +535,7 @@ suite('containers', function () {
           {name: 'age', type: 'int'}
         ]
       });
-      var Person = t.getRecordConstructor();
+      var Person = t.recordConstructor;
       var p1 = [
         new Person('Ann', 23),
         new Person('Bob', 25)
@@ -594,7 +594,7 @@ suite('containers', function () {
           ]
         }
       });
-      var Person = t2.getItemsType().getRecordConstructor();
+      var Person = t2.itemsType.recordConstructor;
       var persons = [];
       var encoder = new streams.BlockEncoder(t1);
       var decoder = new streams.BlockDecoder({parseHook: parseHook})
