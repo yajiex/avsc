@@ -1262,6 +1262,15 @@ suite('types', function () {
       assert.throws(function () { t.compareBuffers(b1, b1); });
     });
 
+    test('compare allowing maps', function () {
+      var t = new builtins.MapType({type: 'map', values: 'int'});
+      var o = {allowMaps: true};
+      assert.equal(t.compare({}, {}, o), 0);
+      assert.equal(t.compare({one: 1}, {one: 2}, o), -1);
+      assert.equal(t.compare({one: 1, two: 2}, {one: 0}, o), 1);
+      assert.equal(t.compare({two: 2}, {one: 0}, o), 1);
+    });
+
     test('isValid hook', function () {
       var t = new builtins.MapType({type: 'map', values: 'int'});
       var o = {one: 1, two: 'deux', three: null, four: 4};
@@ -1281,7 +1290,6 @@ suite('types', function () {
       assert.strictEqual(t.name, undefined);
       assert.strictEqual(t.branchName, 'map');
     });
-
   });
 
   suite('ArrayType', function () {
