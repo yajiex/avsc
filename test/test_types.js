@@ -591,6 +591,21 @@ suite('types', function () {
       assert.throws(function () { t.wrap(1.0); }, /directly/);
     });
 
+    test('branch type', function () {
+      var t = new builtins.UnwrappedUnionType(['null', 'double']);
+      assert.strictEqual(t.branchType(null).typeName, 'null');
+      assert.strictEqual(t.branchType(123).typeName, 'double');
+      assert.strictEqual(t.branchType('foo'), undefined);
+      assert.strictEqual(t.branchType({'double': 123}), undefined);
+    });
+
+    test('branch value', function () {
+      var t = new builtins.UnwrappedUnionType(['null', 'double']);
+      assert.strictEqual(t.branchValue(null), null);
+      assert.equal(t.branchValue(123), 123);
+      assert.strictEqual(t.branchType({'double': 123}), undefined);
+      assert.strictEqual(t.branchType('foo'), undefined);
+    });
   });
 
   suite('WrappedUnionType', function () {
@@ -836,6 +851,22 @@ suite('types', function () {
         t.clone({'long': 4}).switch({}, function (n) { return n; }),
         'long'
       );
+    });
+
+    test('branch type', function () {
+      var t = new builtins.WrappedUnionType(['null', 'double']);
+      assert.strictEqual(t.branchType(null).typeName, 'null');
+      assert.strictEqual(t.branchType({'double': 123}).typeName, 'double');
+      assert.strictEqual(t.branchType(123), undefined);
+      assert.strictEqual(t.branchType('foo'), undefined);
+    });
+
+    test('branch value', function () {
+      var t = new builtins.WrappedUnionType(['null', 'double']);
+      assert.strictEqual(t.branchValue(null), null);
+      assert.deepEqual(t.branchValue({'double': 123}), 123);
+      assert.strictEqual(t.branchType(123), undefined);
+      assert.strictEqual(t.branchType('foo'), undefined);
     });
   });
 
