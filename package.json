@@ -1,6 +1,6 @@
 {
   "name": "avsc",
-  "version": "6.0.0-alpha.8",
+  "version": "6.0.0-alpha.9",
   "description": "Avro for JavaScript",
   "homepage": "https://github.com/mtth/avsc",
   "keywords": [
@@ -32,6 +32,7 @@
     "etc/browser"
   ],
   "main": "./lib",
+  "types": "./types",
   "browser": {
     "./lib": "./etc/browser/avsc.js",
     "./lib/files": "./etc/browser/lib/files.js",

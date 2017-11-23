@@ -1860,6 +1860,56 @@ suite('types', function () {
       assert.throws(function () { v2.createResolver(v1); });
     });
 
+    test('resolve consolidated reads same type', function () {
+      var t1 = Type.forSchema({
+        type: 'record',
+        name: 'Person',
+        fields: [
+          {name: 'phone', type: 'int'},
+        ]
+      });
+      var t2 = Type.forSchema({
+        type: 'record',
+        name: 'Person',
+        fields: [
+          {name: 'number1', type: 'int', aliases: ['phone']},
+          {name: 'number2', type: 'int', aliases: ['phone']},
+          {name: 'phone', type: 'int'},
+        ]
+      });
+      var rsv = t2.createResolver(t1);
+      var buf = t1.toBuffer({phone: 123});
+      assert.deepEqual(
+        t2.fromBuffer(buf, rsv),
+        {number1: 123, number2: 123, phone: 123}
+      );
+    });
+
+    test('resolve consolidated reads different types', function () {
+      var t1 = Type.forSchema({
+        type: 'record',
+        name: 'Person',
+        fields: [
+          {name: 'phone', type: 'int'},
+        ]
+      });
+      var t2 = Type.forSchema({
+        type: 'record',
+        name: 'Person',
+        fields: [
+          {name: 'phoneLong', type: 'long', aliases: ['phone']},
+          {name: 'phoneDouble', type: 'double', aliases: ['phone']},
+          {name: 'phone', type: 'int'},
+        ]
+      });
+      var rsv = t2.createResolver(t1);
+      var buf = t1.toBuffer({phone: 123});
+      assert.deepEqual(
+        t2.fromBuffer(buf, rsv),
+        {phoneLong: 123, phoneDouble: 123, phone: 123}
+      );
+    });
+
     test('getName', function () {
       var t = Type.forSchema({
         type: 'record',
