@@ -1141,7 +1141,7 @@ suite('services', function () {
       svc.createClient({server: server})
         .once('channel', function () {
           this.ping({timeout: 10}, function (err) {
-            assert(/interrupted/.test(err), err);
+            assert(/timeout/.test(err), err);
             done();
           });
         });
