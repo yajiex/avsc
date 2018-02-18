@@ -34,6 +34,7 @@ suite('services', function () {
         ],
         messages: {
           hello: {
+            doc: 'say hello',
             request: [{name: 'greeting', type: 'Greeting'}],
             response: 'Greeting',
             errors: ['Curse']
@@ -319,16 +320,23 @@ suite('services', function () {
     });
 
     test('getters', function () {
-      var s = {
+      var s1 = {
         request: [{name: 'ping', type: 'string'}],
         response: 'null'
       };
-      var m = Message.forSchema('Ping', s);
+      var s2 = {
+        request: [],
+        'one-way': true,
+        response: 'null',
+        doc: 'a random int'
+      };
+      var m = Message.forSchema('Ping', s1);
       assert.equal(m.name, 'Ping');
       assert.equal(m.requestType.fields[0].name, 'ping');
       assert.equal(m.responseType.branchName, 'null');
       assert.strictEqual(m.oneWay, false);
-      assert.deepEqual(m.schema(), s);
+      assert.deepEqual(m.schema(), s1);
+      assert.deepEqual(Message.forSchema('Pong', s2).schema(), s2);
     });
 
     test('get documentation', function () {
@@ -1172,7 +1180,7 @@ suite('services', function () {
       var server = svc.createServer();
       var client = svc.createClient({server: server});
       client.activeChannels()[0].on('eot', function () { done(); });
-      server.destroyChannels();
+      server.destroyChannels({noWait: true});
     });
 
     test('client context call options', function (done) {
@@ -1498,7 +1506,7 @@ suite('services', function () {
         opts = opts || {};
         opts.silent = true;
         var client = clientPtcl.createClient(opts);
-        client.createChannel(writableFactory);
+        client.createChannel(writableFactory, {serverHash: 'abc'});
         var server = serverPtcl.createServer(opts);
         cb(client, server);
 

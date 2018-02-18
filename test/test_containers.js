@@ -212,6 +212,16 @@ suite('containers', function () {
         }, 50);
       });
 
+      test('trailing data', function (cb) {
+        var t = Type.forSchema('string');
+        var decoder = new RawDecoder(t)
+          .on('data', function () {}) // Set to flowing mode.
+          .on('error', function (err) {
+            assert(/trailing/.test(err), err);
+            cb();
+          });
+        decoder.end(new Buffer([2]));
+      });
     });
 
     suite('BlockEncoder', function () {
@@ -654,14 +664,9 @@ suite('containers', function () {
           cb();
         });
       encoder.pipe(decoder);
-      encoder.write({name: 'Ann'})
-      encoder.write({name: 'Jane'})
+      encoder.write({name: 'Ann'});
+      encoder.write({name: 'Jane'});
       encoder.end();
-
-      function parseHook(schema) {
-        assert.deepEqual(schema, t1.getSchema());
-        return t2;
-      }
     });
 
   });

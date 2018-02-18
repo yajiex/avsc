@@ -423,11 +423,17 @@ suite('types', function () {
 
     testType(builtins.UnwrappedUnionType, data, schemas);
 
-    test('getTypes', function () {
+    test('types', function () {
       var t = new builtins.UnwrappedUnionType(['null', 'int']);
       var ts = t.types;
       assert(ts[0].equals(Type.forSchema('null')));
       assert(ts[1].equals(Type.forSchema('int')));
+    });
+
+    test('type', function () {
+      var t = new builtins.UnwrappedUnionType(['null', 'int']);
+      assert.strictEqual(t.type('null'), t.types[0]);
+      assert.strictEqual(t.type('float'), undefined);
     });
 
     test('getTypeName', function () {
@@ -857,7 +863,7 @@ suite('types', function () {
       var t = new builtins.WrappedUnionType(['null', 'double']);
       assert.strictEqual(t.branchType(null).typeName, 'null');
       assert.strictEqual(t.branchType({'double': 123}).typeName, 'double');
-      assert.strictEqual(t.branchType(123), undefined);
+      assert.strictEqual(t.branchType({}), undefined);
       assert.strictEqual(t.branchType('foo'), undefined);
     });
 
@@ -865,8 +871,6 @@ suite('types', function () {
       var t = new builtins.WrappedUnionType(['null', 'double']);
       assert.strictEqual(t.branchValue(null), null);
       assert.deepEqual(t.branchValue({'double': 123}), 123);
-      assert.strictEqual(t.branchType(123), undefined);
-      assert.strictEqual(t.branchType('foo'), undefined);
     });
   });
 
@@ -1262,12 +1266,18 @@ suite('types', function () {
       assert.throws(function () { t.compareBuffers(b1, b1); });
     });
 
+    test('compare default', function () {
+      var t = new builtins.MapType({type: 'map', values: 'int'});
+      assert.throws(function () { t.compare({}, {}); });
+    });
+
     test('compare allowing maps', function () {
       var t = new builtins.MapType({type: 'map', values: 'int'});
       var o = {allowMaps: true};
       assert.equal(t.compare({}, {}, o), 0);
       assert.equal(t.compare({one: 1}, {one: 2}, o), -1);
       assert.equal(t.compare({one: 1, two: 2}, {one: 0}, o), 1);
+      assert.equal(t.compare({one: 1, two: 2}, {one: 1, two: 3}, o), -1);
       assert.equal(t.compare({two: 2}, {one: 0}, o), 1);
     });
 
@@ -2790,9 +2800,9 @@ suite('types', function () {
         ['null', {type: 'int', logicalType: 'age'}],
         {logicalTypes: logicalTypes, wrapUnions: true}
       );
-      var resolver = t.createResolver(t)
+      var resolver = t.createResolver(t);
       var v = {'int': 34};
-      assert.deepEqual(t.fromBuffer(t.toBuffer(v), resolver), v)
+      assert.deepEqual(t.fromBuffer(t.toBuffer(v), resolver), v);
     });
 
     test('even integer', function () {
