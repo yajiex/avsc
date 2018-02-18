@@ -244,7 +244,8 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {
           ping: {request: [], response: 'boolean'},
-          pong: {request: [], response: 'int'}
+          pong: {request: [], response: 'int'},
+          pung: {request: [], response: 'null', 'one-way': true}
         }
       });
       var pongSvc = Service.forProtocol({
@@ -253,10 +254,15 @@ suite('services', function () {
           pong: {request: [], response: 'long'}
         }
       });
+      var pungSvc = Service.forProtocol({
+        protocol: 'Pong',
+        messages: {pung: {request: [], response: 'null'}}
+      });
       assert(Service.compatible(emptySvc, pingSvc));
       assert(!Service.compatible(pingSvc, emptySvc));
       assert(!Service.compatible(pingSvc, pongSvc));
       assert(Service.compatible(pongSvc, pingSvc));
+      assert(!Service.compatible(pungSvc, pingSvc));
     });
   });
 
@@ -1021,6 +1027,28 @@ suite('services', function () {
       }
     });
 
+    test('emit with channel', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Ping',
+        messages: {ping: {request: [], response: 'boolean'}}
+      });
+      var transports = createPassthroughTransports();
+      // This policy is invalid, calls without explicit channels will fail.
+      var client = svc.createClient({channelPolicy: function () { return 1;}});
+      var channel = client.createChannel(transports[0]);
+      svc.createServer()
+        .onPing(function (cb) { cb(null, true); })
+        .createChannel(transports[1]);
+      client.ping(function (err) {
+        assert(/invalid channel/.test(err), err);
+        client.ping({channel: channel}, function (err, res) {
+          assert(!err, err);
+          assert.strictEqual(res, true);
+          done();
+        });
+      });
+    });
+
     test('remote protocols existing', function () {
       var ptcl1 = Service.forProtocol({protocol: 'Empty1'});
       var ptcl2 = Service.forProtocol({protocol: 'Empty2'});
@@ -1030,6 +1058,18 @@ suite('services', function () {
         remoteProtocols: remotePtcls
       });
       assert.deepEqual(client.remoteProtocols(), remotePtcls);
+    });
+
+    test('missing message', function () {
+      var svc = Service.forProtocol({
+        protocol: 'Ping',
+        messages: {ping: {request: [], response: 'int'}}
+      });
+      var client = svc.createClient();
+      assert.throws(
+        function () { client.emitMessage('foo'); },
+        /unknown message/
+      );
     });
 
     test('invalid response', function (done) {
@@ -1428,6 +1468,29 @@ suite('services', function () {
         });
     });
 
+    test('client non-strict error', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Math',
+        messages: {
+          neg: {
+            request: [{name: 'n', type: 'int'}],
+            response: 'int',
+            errors: ['int']
+          }
+        }
+      }, {wrapUnions: true});
+      var server = svc.createServer({silent: true})
+        .onNeg(function (n, cb) { cb(n ? {int: n} : new Error('foo')); });
+      var client = svc.createClient({server: server});
+      client.neg(1, function (err) {
+          assert.deepEqual(err, {int: 1});
+          client.neg(0, function (err) {
+            assert(/foo/.test(err), err);
+            done();
+          });
+        });
+    });
+
     test('server non-strict error', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Math',
@@ -1565,6 +1628,22 @@ suite('services', function () {
         });
       });
 
+      test('one-way message', function (done) {
+        var svc = Service.forProtocol({
+          protocol: 'Ping',
+          messages: {
+            ping: {request: [], response: 'null', 'one-way': true}
+          }
+        });
+        setupFn(svc, svc, function (client, server) {
+          server.onPing(function (cb) {
+            assert.strictEqual(cb, undefined);
+            done();
+          });
+          client.ping();
+        });
+      });
+
       test('invalid strict error', function (done) {
         var svc = Service.forProtocol({
           protocol: 'Math',
@@ -1629,6 +1708,38 @@ suite('services', function () {
             assert(/internal server error/.test(err), err);
             done();
           });
+        });
+      });
+
+      test('server duplicate handler call', function (done) {
+        var svc = Service.forProtocol({
+          protocol: 'Math',
+          messages: {
+            neg: {request: [{name: 'n', type: 'int'}], response: 'int'}
+          }
+        });
+        setupFn(svc, svc, function (client, server) {
+          var pending = 2;
+          server
+            .onNeg(function (n, cb) {
+              cb(null, -n);
+              cb(null, -n);
+            })
+            .on('error', function (err) {
+              assert(/duplicate handler/.test(err), err);
+              step();
+            });
+          // The client should still get a response.
+          client.neg(2, function (err, res) {
+            assert.equal(res, -2);
+            step();
+          });
+
+          function step() {
+            if (--pending === 0) {
+              done();
+            }
+          }
         });
       });
 
@@ -1900,6 +2011,21 @@ suite('services', function () {
               assert.deepEqual(server.remoteProtocols(), remotePtcl);
               done();
             });
+        });
+      });
+
+      test('client remote error no callback', function (done) {
+        var svc = Service.forProtocol({
+          protocol: 'Ping',
+          messages: {ping: {request: [], response: 'int'}}
+        });
+        setupFn(svc, svc, function (client) {
+          client
+            .on('error', function (err) {
+              assert(/not implemented/.test(err), err);
+              done();
+            })
+            .ping();
         });
       });
 
