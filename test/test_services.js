@@ -845,7 +845,7 @@ suite('services', function () {
       });
       var client = svc.createClient();
       client.createChannel(function (buf, cb) {
-        cb(null, new Buffer([0, 0, 0, 2, 48]));
+        cb(null, {payload: new Buffer([0, 0, 0, 2, 48])});
       }, {noPing: true, objectMode: true});
       client.ping(function (err) {
         assert(/truncated.*HandshakeResponse/.test(err), err);
@@ -867,7 +867,7 @@ suite('services', function () {
       var numHandshakes = 0;
       var client = svc.createClient();
       client.createChannel(function (buf, cb) {
-        cb(null, hres.toBuffer());
+        cb(null, {payload: hres.toBuffer()});
       }, {objectMode: true}).on('handshake', function (hreq, actualHres) {
         numHandshakes++;
         assert.deepEqual(actualHres, hres);
@@ -1206,6 +1206,45 @@ suite('services', function () {
         .echo(123, function (err, n) {
           assert(!err, err);
           assert.equal(n, 123);
+          done();
+        });
+    });
+
+    test('object-mode handler options', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Echo',
+        messages: {
+          echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
+        }
+      });
+      var opts = {timeout: 100, foo: 'foo'};
+      var server = svc.createServer()
+        .use(function (wreq, wres, next) {
+          assert.equal(this.locals.callOpts, opts);
+          next();
+        })
+        .onEcho(function (n, cb) { cb(null, n); })
+        .on('channel', function (chan) {
+          chan.on('incomingCall', function (ctx, opts) {
+            ctx.locals.callOpts = opts;
+          });
+        });
+      var client = svc.createClient();
+      var pending = 2;
+      server.createChannel(function (fn) {
+        pending--;
+        assert.strictEqual(this.server, server); // Server channel.
+        client.createChannel(function (obj, cb) {
+          assert.deepEqual(obj.callOpts, opts);
+          assert.strictEqual(this.client, client); // Client channel.
+          pending--;
+          fn(obj, cb);
+        }, {objectMode: true, noPing: true});
+      }, {objectMode: true});
+      client.echo(123, opts, function (err, n) {
+          assert(!err, err);
+          assert.equal(n, 123);
+          assert(!pending);
           done();
         });
     });
