@@ -1143,7 +1143,7 @@ suite('services', function () {
     });
   });
 
-  suite('clients & servers', function () { // >=5.0 API.
+  suite('clients & servers', function () {
 
     test('create client with server', function (done) {
       var svc = Service.forProtocol({
@@ -1160,6 +1160,19 @@ suite('services', function () {
           assert.equal(n, 123);
           done();
         });
+    });
+
+    test('create client with server destroy channels', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Echo',
+        messages: {
+          echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
+        }
+      });
+      var server = svc.createServer();
+      var client = svc.createClient({server: server});
+      client.activeChannels()[0].on('eot', function () { done(); });
+      server.destroyChannels();
     });
 
     test('client context call options', function (done) {
