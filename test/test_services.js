@@ -1336,28 +1336,29 @@ suite('services', function () {
         }
       });
       var server = svc.createServer()
-        .use(function (server) {
-          server.on('channel', function (channel) {
-            channel.on('incomingRequestPre', function (wreq, ctx) {
-              ctx.foo = 'bar';
+        .call(function (server) {
+          server
+            .on('channel', function (channel) {
+              channel.on('incomingRequestPre', function (wreq, ctx) {
+                ctx.foo = 'bar';
+              });
+            })
+            .use(function (wreq, wres, next) {
+              wreq.request.n = 3;
+              next();
             });
-          });
-          return function (wreq, wres, next) {
-            wreq.request.n = 3;
-            next();
-          };
         })
         .onNeg(function (n, cb) {
           assert.equal(this.foo, 'bar');
           cb(null, -n);
         });
       svc.createClient({server: server})
-        .use(function (client) {
+        .call(function (client) {
           client.activeChannels()[0]
             .on('outgoingRequestPre', function (wreq, ctx) {
               ctx.two += 1;
             });
-          return function (wreq, wres, next) { next(); };
+          client.use(function (wreq, wres, next) { next(); });
         })
         .neg(1, {two: 2}, function (err, n) {
           assert(!err, err);
