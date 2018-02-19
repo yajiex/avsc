@@ -8,9 +8,8 @@ var types = require('../lib/types'),
     stream = require('stream'),
     util = require('util');
 
-
+var Packet = services.Packet;
 var Service = services.Service;
-
 
 suite('services', function () {
 
@@ -384,92 +383,20 @@ suite('services', function () {
     var FrameDecoder = services.streams.FrameDecoder;
     var FrameEncoder = services.streams.FrameEncoder;
 
-    test('decode', function (done) {
-      var frames = [
-        new Buffer([0, 1]),
-        new Buffer([2]),
-        new Buffer([]),
-        new Buffer([3, 4]),
-        new Buffer([])
-      ].map(frame);
-      var messages = [];
-      createReadableStream(frames)
-        .pipe(new FrameDecoder())
-        .on('finish', function () {
-          assert.deepEqual(
-            messages,
-            [new Buffer([0, 1, 2]), new Buffer([3, 4])]
-          );
-          done();
-        })
-        .pipe(createWritableStream(messages));
-    });
-
-    test('decode with trailing data', function (done) {
-      var frames = [
-        new Buffer([0, 1]),
-        new Buffer([2]),
-        new Buffer([]),
-        new Buffer([3])
-      ].map(frame);
-      var messages = [];
-      createReadableStream(frames)
-        .pipe(new FrameDecoder())
-        .on('error', function () {
-          assert.deepEqual(messages, [new Buffer([0, 1, 2])]);
-          done();
-        })
-        .pipe(createWritableStream(messages));
-    });
-
-    test('decode empty', function (done) {
-      createReadableStream([])
-        .pipe(new FrameDecoder())
-        .on('end', function () {
-          done();
-        })
-        .pipe(createWritableStream([]));
-    });
-
-    test('encode empty', function (done) {
-      var frames = [];
-      createReadableStream([])
-        .pipe(new FrameEncoder())
-        .pipe(createWritableStream(frames))
-        .on('finish', function () {
-          assert.deepEqual(frames, []);
-          done();
-        });
-    });
-
-    test('encode', function (done) {
-      var messages = [new Buffer([1, 3, 5]), new Buffer([123, 23])];
-      var frames = [];
-      createReadableStream(messages)
-        .pipe(new FrameEncoder())
-        .pipe(createWritableStream(frames))
-        .on('finish', function () {
-          assert.deepEqual(
-            frames,
-            [
-              new Buffer([0, 0, 0, 3]),
-              new Buffer([1, 3, 5]),
-              new Buffer([0, 0, 0, 0]),
-              new Buffer([0, 0, 0, 2]),
-              new Buffer([123, 23]),
-              new Buffer([0, 0, 0, 0])
-            ]
-          );
-          done();
-        });
-    });
-
     test('roundtrip', function (done) {
-      var type = types.Type.forSchema('bytes');
-      var n = 100;
+      var pktType = types.Type.forSchema({
+        type: 'record',
+        name: 'Packet',
+        fields: [
+          {name: 'headers', type: {type: 'map', values: 'bytes'}},
+          {name: 'body', type: 'bytes'}
+        ]
+      });
+      var n = 200;
       var src = [];
       while (n--) {
-        src.push(type.random());
+        var val = pktType.random();
+        src.push(new Packet(0, val.headers, val.body));
       }
       var dst = [];
       var encoder = new FrameEncoder();
@@ -490,41 +417,21 @@ suite('services', function () {
     var NettyDecoder = services.streams.NettyDecoder;
     var NettyEncoder = services.streams.NettyEncoder;
 
-    test('decode with trailing data', function (done) {
-      var src = [
-        new Buffer([0, 0, 0, 2, 0, 0, 0]),
-        new Buffer([1, 0, 0, 0, 5, 1, 3, 4, 2, 5, 1])
-      ];
-      var dst = [];
-      createReadableStream(src)
-        .pipe(new NettyDecoder())
-        .on('error', function () {
-          assert.deepEqual(
-            dst,
-            [{id: 2, payload: [new Buffer([1, 3, 4, 2, 5])]}]
-          );
-          done();
-        })
-        .pipe(createWritableStream(dst));
-    });
-
     test('roundtrip', function (done) {
-      var type = types.Type.forSchema({
+      var pktType = types.Type.forSchema({
         type: 'record',
-        name: 'Record',
+        name: 'Packet',
         fields: [
           {name: 'id', type: 'int'},
-          {name: 'payload', type: {type: 'array', items: 'bytes'}}
+          {name: 'headers', type: {type: 'map', values: 'bytes'}},
+          {name: 'body', type: 'bytes'}
         ]
       });
       var n = 200;
       var src = [];
       while (n--) {
-        var record = type.random();
-        record.payload = record.payload.filter(function (arr) {
-          return arr.length;
-        });
-        src.push(record);
+        var val = pktType.random();
+        src.push(new Packet(val.id, val.headers, val.body));
       }
       var dst = [];
       var encoder = new NettyEncoder();
@@ -553,10 +460,14 @@ suite('services', function () {
       });
       var a = new Adapter(s, s);
       assert.throws(function () {
-        a._decodeRequest(new Buffer([24]));
+        a._decodeRequest({body: new Buffer([24])});
       }, /truncated/);
       assert.throws(function () {
-        a._decodeResponse(new Buffer([48]), {headers: {}}, s.message('echo'));
+        a._decodeResponse(
+          {body: new Buffer([48])},
+          {headers: {}},
+          s.message('echo')
+        );
       }, /truncated/);
     });
   });
@@ -643,10 +554,7 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean'}}
       });
-      var transport = {
-        readable: new stream.PassThrough(),
-        writable: new stream.PassThrough()
-      };
+      var transport = createPassthroughTransports(true)[0];
       svc.createClient().createChannel(transport, {timeout: 5})
         .on('eot', function (pending, err) {
           assert(/timeout/.test(err), err);
@@ -678,7 +586,7 @@ suite('services', function () {
       });
       var transports = createPassthroughTransports();
       svc.createClient()
-        .createChannel(transports[0])
+        .createChannel(transports[0], {codec: 'netty'})
         .on('eot', function () { done(); });
       transports[0].readable.push(null);
     });
@@ -692,7 +600,7 @@ suite('services', function () {
       // end the underlying writable stream.
       var transports = createPassthroughTransports(true);
       svc.createClient()
-        .createChannel(transports[0], {objectMode: true})
+        .createChannel(transports[0])
         .on('eot', function () { done(); });
       transports[0].writable.end();
     });
@@ -706,7 +614,7 @@ suite('services', function () {
       // end the underlying writable stream.
       var transports = createPassthroughTransports(true);
       svc.createClient()
-        .createChannel(transports[0], {objectMode: true, endWritable: false})
+        .createChannel(transports[0], {endWritable: false})
         .on('eot', function () {
           transports[0].writable.write({}); // Doesn't fail.
           done();
@@ -717,7 +625,7 @@ suite('services', function () {
     test('discover service', function (done) {
       // Check that we can interrupt a handshake part-way, so that we can ping
       // a remote server for its service, but still reuse the same connection
-      // for a later trasnmission.
+      // for a later transmission.
       var svc1 = Service.forProtocol({protocol: 'Empty'});
       var svc2 = Service.forProtocol({
         protocol: 'Ping',
@@ -727,10 +635,10 @@ suite('services', function () {
       var transports = createPassthroughTransports();
       var server2 = svc2.createServer()
         .onPing(function (cb) { cb(null, true); });
-      var chn1 = server2.createChannel(transports[0]);
+      var chn1 = server2.createChannel(transports[0], {codec: 'netty'});
       assert.strictEqual(chn1.server.service, svc2);
       svc1.createClient()
-        .createChannel(transports[1], {endWritable: false})
+        .createChannel(transports[1], {codec: 'netty', endWritable: false})
         .on('handshake', function (hreq, hres) {
           this.destroy();
           assert.equal(hres.serverProtocol, JSON.stringify(svc2.protocol));
@@ -738,7 +646,7 @@ suite('services', function () {
         .on('eot', function () {
           // The transports are still available for a connection.
           var client = svc2.createClient();
-          var chn2 = client.createChannel(transports[1]);
+          var chn2 = client.createChannel(transports[1], {codec: 'netty'});
           client.ping(function (err, res) {
             assert.strictEqual(err, null);
             assert.strictEqual(res, true);
@@ -754,7 +662,7 @@ suite('services', function () {
       });
       var transports = createPassthroughTransports();
       svc.createClient()
-        .createChannel(transports[0], {noPing: true})
+        .createChannel(transports[0], {codec: 'netty', noPing: true})
         .on('eot', function (pending, err) {
           assert.equal(pending, 0);
           assert(/trailing/.test(err), err);
@@ -772,9 +680,9 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'boolean'}}
       }, {wrapUnions: true});
       var client = svc.createClient({strictTypes: true});
-      var chn = client.createChannel(function (buf, cb) {
+      var chn = client.createChannel(function (pkt, cb) {
         cb(new Error('foobar'));
-      }, {noPing: true, objectMode: true});
+      }, {noPing: true});
       client.ping(function (err) {
         assert(/foobar/.test(err.string), err);
         assert(!chn.destroyed);
@@ -788,7 +696,10 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'boolean'}}
       }, {wrapUnions: true});
       var client = svc.createClient();
-      var chn = client.createChannel(function () {}, {noPing: true});
+      var chn = client.createChannel(
+        function () {},
+        {codec: 'frame', noPing: true}
+      );
       client.ping(function (err) {
         assert(/no writable transport/.test(err), err);
         assert(!chn.destroyed);
@@ -807,7 +718,7 @@ suite('services', function () {
       var chn = client.createChannel(function (cb) {
         cb(null, readable);
         return new stream.PassThrough();
-      }, {noPing: true})
+      }, {codec: 'frame', noPing: true})
         .on('eot', function (pending, err) {
           assert(/trailing/.test(err), err);
           sawError = true;
@@ -821,7 +732,7 @@ suite('services', function () {
       readable.end(new Buffer([48]));
     });
 
-    test('default encoder error', function (done) {
+    test('frame encoder error', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean'}}
@@ -830,25 +741,10 @@ suite('services', function () {
       var chn = client.createChannel(function (cb) {
         return new stream.PassThrough()
           .on('finish', function () { cb(new Error('foobar')); });
-      }, {noPing: true});
+      }, {codec: 'frame', noPing: true});
       client.ping(function (err) {
         assert(/foobar/.test(err.string));
         assert(!chn.destroyed);
-        done();
-      });
-    });
-
-    test('invalid handshake response', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'null'}}
-      });
-      var client = svc.createClient();
-      client.createChannel(function (buf, cb) {
-        cb(null, {payload: new Buffer([0, 0, 0, 2, 48])});
-      }, {noPing: true, objectMode: true});
-      client.ping(function (err) {
-        assert(/truncated.*HandshakeResponse/.test(err), err);
         done();
       });
     });
@@ -866,9 +762,9 @@ suite('services', function () {
       });
       var numHandshakes = 0;
       var client = svc.createClient();
-      client.createChannel(function (buf, cb) {
-        cb(null, {payload: hres.toBuffer()});
-      }, {objectMode: true}).on('handshake', function (hreq, actualHres) {
+      client.createChannel(function (reqPkt, cb) {
+        cb(null, {handshake: hres});
+      }).on('handshake', function (hreq, actualHres) {
         numHandshakes++;
         assert.deepEqual(actualHres, hres);
         this.destroy(true);
@@ -904,7 +800,7 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'boolean'}}
       });
       var transport = new stream.PassThrough();
-      svc.createServer().createChannel(transport)
+      svc.createServer().createChannel(transport, {codec: 'netty'})
         .on('eot', function (pending, err) {
           assert(/trailing/.test(err), err);
           assert(this.destroyed);
@@ -921,7 +817,7 @@ suite('services', function () {
       // We must use object mode here since ending the encoding stream won't
       // end the underlying writable stream.
       var transports = createPassthroughTransports(true);
-      svc.createServer().createChannel(transports[0], {objectMode: true})
+      svc.createServer().createChannel(transports[0])
         .on('eot', function () { done(); });
       transports[0].writable.end();
     });
@@ -937,7 +833,7 @@ suite('services', function () {
       var transports = createPassthroughTransports();
       svc.createServer({silent: true}).createChannel(function (fn) {
         fn(transports[1].readable, transports[0].writable);
-      }).on('eot', function (pending, err) {
+      }, {codec: 'frame'}).on('eot', function (pending, err) {
         assert(/trailing/.test(err), err);
         done();
       });
@@ -989,13 +885,10 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'null', 'one-way': true}}
       });
-      var transport = {
-        readable: new stream.PassThrough(),
-        writable: new stream.PassThrough()
-      };
+      var transports = createPassthroughTransports(true);
       var client = svc.createClient();
-      client.createChannel(transport, {noPing: true});
-      client.createChannel(transport, {noPing: true});
+      client.createChannel(transports[0], {noPing: true});
+      client.createChannel(transports[1], {noPing: true});
       client.ping(function (err) {
         assert(!err, err);
         assert.strictEqual(this.channel.client, client);
@@ -1008,15 +901,11 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean'}}
       });
-      var transport = {
-        readable: new stream.PassThrough(),
-        writable: new stream.PassThrough()
-      };
-
+      var transports = createPassthroughTransports(true);
       var client = svc.createClient({channelPolicy: policy});
       var channels = [
-        client.createChannel(transport),
-        client.createChannel(transport)
+        client.createChannel(transports[0]),
+        client.createChannel(transports[0])
       ];
       client.ping();
 
@@ -1031,7 +920,7 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean'}}
       });
-      var transports = createPassthroughTransports();
+      var transports = createPassthroughTransports(true);
       // This policy is invalid, calls without explicit channels will fail.
       var client = svc.createClient({channelPolicy: function () { return 1;}});
       var channel = client.createChannel(transports[0]);
@@ -1076,13 +965,9 @@ suite('services', function () {
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'int'}}
       });
-      var opts = {noPing: true, objectMode: true};
-      var transport = {
-        readable: new stream.PassThrough(opts),
-        writable: new stream.PassThrough(opts)
-      };
+      var transports = createPassthroughTransports(true);
       var client = svc.createClient();
-      client.createChannel(transport, opts);
+      client.createChannel(transports[0], {noPing: true});
       client.ping(function (err) {
         assert(/truncated/.test(err), err);
         done();
@@ -1090,7 +975,7 @@ suite('services', function () {
       setTimeout(function () {
         // "Send" an invalid payload (negative union offset). We wait to allow
         // the callback for the above message to be registered.
-        transport.readable.write({id: 1, payload: [new Buffer([45])]});
+        transports[0].readable.write({id: 1, body: new Buffer([45])});
       }, 0);
     });
   });
@@ -1100,13 +985,9 @@ suite('services', function () {
     test('get channels', function (done) {
       var svc = Service.forProtocol({protocol: 'Empty1'});
       var server = svc.createServer();
-      var transport = {
-        readable: new stream.PassThrough(),
-        writable: new stream.PassThrough()
-      };
       var channels = [
-        server.createChannel(transport),
-        server.createChannel(transport)
+        server.createChannel(createPassthroughTransports(true)[0]),
+        server.createChannel(createPassthroughTransports(true)[0])
       ];
       assert.deepEqual(server.activeChannels(), channels);
       channels[0]
@@ -1289,7 +1170,7 @@ suite('services', function () {
       });
       var server = svc.createServer()
         .on('channel', function (channel) {
-          channel.on('incomingRequestPre', function (ctx) {
+          channel.on('incomingRequestPre', function (wreq, ctx) {
             ctx.one = 1;
           });
         })
@@ -1437,7 +1318,7 @@ suite('services', function () {
       var server = svc.createServer()
         .use(function (server) {
           server.on('channel', function (channel) {
-            channel.on('incomingRequestPre', function (ctx) {
+            channel.on('incomingRequestPre', function (wreq, ctx) {
               ctx.foo = 'bar';
             });
           });
@@ -1453,7 +1334,7 @@ suite('services', function () {
       svc.createClient({server: server})
         .use(function (client) {
           client.activeChannels()[0]
-            .on('outgoingRequestPre', function (ctx) {
+            .on('outgoingRequestPre', function (wreq, ctx) {
               ctx.two += 1;
             });
           return function (wreq, wres, next) { next(); };
@@ -1544,14 +1425,15 @@ suite('services', function () {
           cb = opts;
           opts = undefined;
         }
+        var codec = null;
         opts = opts || {};
+        opts.codec = codec;
         opts.silent = true;
-        var pt1 = new stream.PassThrough();
-        var pt2 = new stream.PassThrough();
+        var transports = createPassthroughTransports(true);
         var client = clientPtcl.createClient(opts);
-        client.createChannel({readable: pt1, writable: pt2});
+        client.createChannel(transports[0], {codec: codec});
         var server = serverPtcl.createServer(opts);
-        server.createChannel({readable: pt2, writable: pt1}, opts);
+        server.createChannel(transports[1], opts);
         cb(client, server);
       });
 
@@ -1567,21 +1449,9 @@ suite('services', function () {
         opts = opts || {};
         opts.silent = true;
         var client = clientPtcl.createClient(opts);
-        client.createChannel(writableFactory, {serverHash: 'abc'});
         var server = serverPtcl.createServer(opts);
+        server.createChannel(function (fn) { client.createChannel(fn); });
         cb(client, server);
-
-        function writableFactory(transportCb) {
-          var reqPt = new stream.PassThrough()
-            .on('finish', function () {
-              server.createChannel(function (fn) {
-                var resPt = new stream.PassThrough()
-                  .on('finish', function () { transportCb(null, resPt); });
-                fn(reqPt, resPt);
-              }, opts);
-            });
-          return reqPt;
-        }
       });
 
     });
@@ -1617,7 +1487,7 @@ suite('services', function () {
                   assert.strictEqual(err, null);
                   assert.equal(res, -20);
                   client.negateFirst([-10, 'ni'],  function (err) {
-                    assert(/invalid "negateFirst" request/.test(err), err);
+                    assert(/invalid "int"/.test(err), err);
                     this.channel.destroy();
                   });
                 });
@@ -1915,38 +1785,6 @@ suite('services', function () {
         });
       });
 
-      test('server middleware invalid response header', function (done) {
-        var svc = Service.forProtocol({
-          protocol: 'Math',
-          messages: {
-            neg: {request: [{name: 'n', type: 'int'}], response: 'int'}
-          }
-        });
-        setupFn(svc, svc, function (client, server) {
-          var fooErr = new Error('foobar');
-          var sawFoo = 0;
-          server
-            .on('error', function (err) {
-              if (err === fooErr) {
-                sawFoo++;
-                return;
-              }
-              assert.equal(sawFoo, 1);
-              assert(/invalid "bytes"/.test(err.message));
-              setTimeout(function () { done(); }, 0);
-            })
-            .use(function (wreq, wres, next) {
-              wres.headers.id = 123;
-              next();
-            })
-            .onNeg(function () { throw fooErr; });
-          client
-            .neg(2, function (err) {
-              assert(/internal server error/.test(err), err);
-            });
-        });
-      });
-
       test('error formatter', function (done) {
         var svc = Service.forProtocol({
           protocol: 'Math',
@@ -2219,7 +2057,7 @@ suite('services', function () {
         .onUpper(function (str, cb) {
           cb(null, str.toUpperCase());
         });
-      var transports = createPassthroughTransports();
+      var transports = createPassthroughTransports(true);
       server.createChannel(transports[1]);
       discoverProtocol(transports[0], function (err, actualAttrs) {
         assert.strictEqual(err, null);
@@ -2250,7 +2088,7 @@ suite('services', function () {
       };
       var svc = Service.forProtocol(schema);
       var scope = 'bar';
-      var transports = createPassthroughTransports();
+      var transports = createPassthroughTransports(true);
       svc.createServer({silent: true})
         .createChannel(transports[1], {scope: scope});
       discoverProtocol(transports[0], {timeout: 5}, function (err) {
@@ -2269,14 +2107,6 @@ suite('services', function () {
 });
 
 // Helpers.
-
-// Message framing.
-function frame(buf) {
-  var framed = new Buffer(buf.length + 4);
-  framed.writeInt32BE(buf.length);
-  buf.copy(framed, 4);
-  return framed;
-}
 
 function createPassthroughTransports(objectMode) {
   var pt1 = stream.PassThrough({objectMode: objectMode});
