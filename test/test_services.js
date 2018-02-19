@@ -961,7 +961,6 @@ suite('services', function () {
       // With callback.
       client.ping(function (err) {
         assert(/no available channels/.test(err), err);
-        assert.deepEqual(this.locals, {});
         assert.strictEqual(this.channel, undefined);
         // Without (triggering the error above).
         client.ping();
@@ -1210,45 +1209,6 @@ suite('services', function () {
         });
     });
 
-    test('object-mode handler options', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Echo',
-        messages: {
-          echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
-        }
-      });
-      var opts = {timeout: 100, foo: 'foo'};
-      var server = svc.createServer()
-        .use(function (wreq, wres, next) {
-          assert.equal(this.locals.callOpts, opts);
-          next();
-        })
-        .onEcho(function (n, cb) { cb(null, n); })
-        .on('channel', function (chan) {
-          chan.on('incomingCall', function (ctx, opts) {
-            ctx.locals.callOpts = opts;
-          });
-        });
-      var client = svc.createClient();
-      var pending = 2;
-      server.createChannel(function (fn) {
-        pending--;
-        assert.strictEqual(this.server, server); // Server channel.
-        client.createChannel(function (obj, cb) {
-          assert.deepEqual(obj.callOpts, opts);
-          assert.strictEqual(this.client, client); // Client channel.
-          pending--;
-          fn(obj, cb);
-        }, {objectMode: true, noPing: true});
-      }, {objectMode: true});
-      client.echo(123, opts, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, 123);
-          assert(!pending);
-          done();
-        });
-    });
-
     test('create client with server destroy channels', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Echo',
@@ -1271,16 +1231,16 @@ suite('services', function () {
       });
       var server = svc.createServer()
         .onNeg(function (n, cb) { cb(null, -n); });
-      var opts = {id: 123};
+      var ctx = {id: 123};
       var client = svc.createClient({server: server});
       var channel = client.activeChannels()[0];
-      channel.on('outgoingCall', function (ctx, opts) {
-        ctx.locals.id = opts.id;
+      channel.on('outgoingRequestPre', function (ctx) {
+        ctx.id = 123;
       });
-      client.neg(1, opts, function (err, n) {
+      client.neg(1, ctx, function (err, n) {
         assert(!err, err);
         assert.equal(n, -1);
-        assert.equal(this.locals.id, 123);
+        assert.equal(this.id, 123);
         done();
       });
     });
@@ -1296,18 +1256,18 @@ suite('services', function () {
       var server = svc.createServer()
         .use(function (wreq, wres, next) {
           // Check that middleware have the right context.
-          this.locals.id = 123;
+          this.id = 123;
           assert.equal(numCalls++, 0);
           next(null, function (err, prev) {
             assert(!err, err);
-            assert.equal(this.locals.id, 456);
+            assert.equal(this.id, 456);
             assert.equal(numCalls++, 2);
             prev(err);
           });
         })
         .onNeg(function (n, cb) {
-          assert.equal(this.locals.id, 123);
-          this.locals.id = 456;
+          assert.equal(this.id, 123);
+          this.id = 456;
           assert.equal(numCalls++, 1);
           cb(null, -n);
         });
@@ -1327,19 +1287,18 @@ suite('services', function () {
           neg: {request: [{name: 'n', type: 'int'}], response: 'int'}
         }
       });
-      var locals = {num: 123};
       var server = svc.createServer()
         .on('channel', function (channel) {
-          channel.on('incomingCall', function (ctx) {
-            ctx.locals.num = locals.num;
+          channel.on('incomingRequestPre', function (ctx) {
+            ctx.one = 1;
           });
         })
         .use(function (wreq, wres, next) {
-          assert.deepEqual(this.locals, locals);
+          assert.deepEqual(this.one, 1);
           next();
         })
         .onNeg(function (n, cb) {
-          assert.deepEqual(this.locals, locals);
+          assert.deepEqual(this.one, 1);
           cb(null, -n);
         });
       svc.createClient({server: server})
@@ -1374,7 +1333,6 @@ suite('services', function () {
 
       function defaultHandler(wreq, wres, cb) {
         // jshint -W040
-        assert.equal(this.message.name, 'abs');
         wres.response = 10;
         cb();
       }
@@ -1479,8 +1437,8 @@ suite('services', function () {
       var server = svc.createServer()
         .use(function (server) {
           server.on('channel', function (channel) {
-            channel.on('incomingCall', function (ctx) {
-              ctx.locals.foo = 'bar';
+            channel.on('incomingRequestPre', function (ctx) {
+              ctx.foo = 'bar';
             });
           });
           return function (wreq, wres, next) {
@@ -1489,20 +1447,21 @@ suite('services', function () {
           };
         })
         .onNeg(function (n, cb) {
-          assert.equal(this.locals.foo, 'bar');
+          assert.equal(this.foo, 'bar');
           cb(null, -n);
         });
       svc.createClient({server: server})
         .use(function (client) {
-          client.activeChannels()[0].on('outgoingCall', function (ctx, opts) {
-            ctx.locals.two = opts.two;
-          });
+          client.activeChannels()[0]
+            .on('outgoingRequestPre', function (ctx) {
+              ctx.two += 1;
+            });
           return function (wreq, wres, next) { next(); };
         })
         .neg(1, {two: 2}, function (err, n) {
           assert(!err, err);
           assert.equal(n, -3);
-          assert.equal(this.locals.two, 2);
+          assert.equal(this.two, 3);
           done();
         });
     });
