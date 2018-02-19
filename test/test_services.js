@@ -5,6 +5,7 @@
 var types = require('../lib/types'),
     services = require('../lib/services'),
     assert = require('assert'),
+    sinon = require('sinon'),
     stream = require('stream'),
     util = require('util');
 
@@ -556,7 +557,7 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'boolean'}}
       });
       var transport = createPassthroughTransports(true)[0];
-      svc.createClient().createChannel(transport, {timeout: 5})
+      svc.createClient({timeout: 5}).createChannel(transport)
         .on('error', function (err) {
           assert(/timeout/.test(err), err);
           assert.strictEqual(this.client.service, svc);
@@ -572,9 +573,9 @@ suite('services', function () {
         writable: new stream.PassThrough({objectMode: true})
       };
       var channel = svc.createClient()
-        .createChannel(transport, {noPing: true, objectMode: true, timeout: 5})
+        .createChannel(transport, {noPing: true, objectMode: true})
         .on('eot', function () { done(); });
-      channel.ping(function (err) {
+      channel.ping(10, function (err) {
         assert(/timeout/.test(err), err);
         channel.destroy();
       });
@@ -1079,6 +1080,35 @@ suite('services', function () {
         .echo(123, function (err, n) {
           assert(!err, err);
           assert.equal(n, 123);
+          done();
+        });
+    });
+
+    test('middleware deadline', function (done) {
+      var clock = sinon.useFakeTimers();
+      var svc = Service.forProtocol({
+        protocol: 'Echo',
+        messages: {
+          echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
+        }
+      });
+      var pending = 1;
+      var server = svc.createServer();
+      svc.createClient({server: server})
+        .use(function (wreq, wres, next) {
+          clock.tick(75);
+          next(null, function (err, prev) {
+            pending--;
+            prev(err);
+          });
+        })
+        .use(function (wreq, wres, next) {
+          setTimeout(next, 100);
+        })
+        .echo(123, {deadline: 50}, function (err) {
+          assert(/deadline exceeded/.test(err), err);
+          assert(!pending);
+          clock.restore();
           done();
         });
     });
