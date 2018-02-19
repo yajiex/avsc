@@ -460,13 +460,14 @@ suite('services', function () {
       });
       var a = new Adapter(s, s);
       assert.throws(function () {
-        a._decodeRequest({body: new Buffer([24])});
+        a._decodeRequest({body: new Buffer([24])}, {});
       }, /truncated/);
       assert.throws(function () {
         a._decodeResponse(
-          {body: new Buffer([48])},
-          {headers: {}},
-          s.message('echo')
+          {body: new Buffer([48]), headers: {}},
+          {tags: {}},
+          s.message('echo'),
+          {}
         );
       }, /truncated/);
     });
@@ -1642,21 +1643,23 @@ suite('services', function () {
           var buf = new Buffer([0, 1]);
           var isDone = false;
           var channel = client.activeChannels()[0];
+          client.tagTypes.buf = types.Type.forSchema('bytes');
           client
             .use(function (wreq, wres, next) {
               // No callback.
               assert.strictEqual(this.channel, channel);
-              assert.deepEqual(wreq.headers, {});
-              wreq.headers.buf = buf;
+              assert.deepEqual(wreq.tags, {});
+              wreq.tags.buf = buf;
               assert.deepEqual(wreq.request, {n: 2});
               next();
             })
             .use(function (wreq, wres, next) {
               // Callback here.
-              assert.deepEqual(wreq.headers, {buf: buf});
+              assert.deepEqual(wreq.tags, {buf: buf});
               wreq.request.n = 3;
               next(null, function (err, prev) {
                 assert(!err, err);
+                assert(!wres.error, wres.error);
                 assert.strictEqual(this.channel, channel);
                 assert.deepEqual(wres.response, -3);
                 isDone = true;
@@ -1744,6 +1747,8 @@ suite('services', function () {
           var buf = new Buffer([0, 1]);
           // The server's channel won't be ready right away in the case of
           // stateless transports.
+          var t = types.Type.forSchema('bytes');
+          client.tagTypes.buf = server.tagTypes.buf = t;
           var channel;
           server
             .use(function (wreq, wres, next) {
@@ -1752,7 +1757,7 @@ suite('services', function () {
               assert.deepEqual(wreq.request, {n: 2});
               next(null, function (err, prev) {
                 assert.strictEqual(this.channel, channel);
-                wres.headers.buf = buf;
+                wres.tags.buf = buf;
                 prev();
               });
             })
@@ -1760,7 +1765,7 @@ suite('services', function () {
           client
             .use(function (wreq, wres, next) {
               next(null, function (err, prev) {
-                assert.deepEqual(wres.headers, {buf: buf});
+                assert.deepEqual(wres.tags, {buf: buf});
                 isDone = true;
                 prev();
               });
