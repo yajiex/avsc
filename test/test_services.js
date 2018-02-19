@@ -556,12 +556,12 @@ suite('services', function () {
       });
       var transport = createPassthroughTransports(true)[0];
       svc.createClient().createChannel(transport, {timeout: 5})
-        .on('eot', function (pending, err) {
+        .on('error', function (err) {
           assert(/timeout/.test(err), err);
           assert.strictEqual(this.client.service, svc);
-          assert(this.destroyed);
-          done();
-        });
+          this.destroy();
+        })
+        .on('eot', function () { done(); });
     });
 
     test('ping', function (done) {
@@ -663,8 +663,7 @@ suite('services', function () {
       var transports = createPassthroughTransports();
       svc.createClient()
         .createChannel(transports[0], {codec: 'netty', noPing: true})
-        .on('eot', function (pending, err) {
-          assert.equal(pending, 0);
+        .on('error', function (err) {
           assert(/trailing/.test(err), err);
           done();
         });
@@ -714,19 +713,12 @@ suite('services', function () {
       }, {wrapUnions: true});
       var client = svc.createClient();
       var readable = new stream.PassThrough();
-      var sawError = false;
-      var chn = client.createChannel(function (cb) {
+      client.createChannel(function (cb) {
         cb(null, readable);
         return new stream.PassThrough();
-      }, {codec: 'frame', noPing: true})
-        .on('eot', function (pending, err) {
-          assert(/trailing/.test(err), err);
-          sawError = true;
-        });
+      }, {codec: 'frame', noPing: true});
       client.ping(function (err) {
-        assert(/interrupted/.test(err), err);
-        assert(chn.destroyed);
-        assert(sawError);
+        assert(/trailing data/.test(err), err);
         done();
       });
       readable.end(new Buffer([48]));
@@ -767,7 +759,7 @@ suite('services', function () {
       }).on('handshake', function (hreq, actualHres) {
         numHandshakes++;
         assert.deepEqual(actualHres, hres);
-        this.destroy(true);
+        this.destroy({noWait: true});
       }).on('error', function (err) {
         assert(/interrupted/.test(err), err);
       });
@@ -801,9 +793,8 @@ suite('services', function () {
       });
       var transport = new stream.PassThrough();
       svc.createServer().createChannel(transport, {codec: 'netty'})
-        .on('eot', function (pending, err) {
+        .on('error', function (err) {
           assert(/trailing/.test(err), err);
-          assert(this.destroyed);
           done();
         });
       transport.end(new Buffer([48]));
@@ -825,15 +816,16 @@ suite('services', function () {
 
   suite('StatelessServerChannel', function () {
 
-    test('trailing data', function (done) {
+    test('trailing frame data', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Ping',
         messages: {ping: {request: [], response: 'boolean', errors: ['int']}}
       });
       var transports = createPassthroughTransports();
       svc.createServer({silent: true}).createChannel(function (fn) {
-        fn(transports[1].readable, transports[0].writable);
-      }, {codec: 'frame'}).on('eot', function (pending, err) {
+        fn(null, transports[0].writable);
+        return transports[1].readable;
+      }, {codec: 'frame'}).on('error', function (err) {
         assert(/trailing/.test(err), err);
         done();
       });
@@ -1060,7 +1052,7 @@ suite('services', function () {
       });
       var server = svc.createServer()
         .onPing(function (cb) {
-          this.channel.destroy(true);
+          this.channel.destroy({noWait: true});
           cb(null, 1); // Still call the callback to make sure it is ignored.
         });
       svc.createClient({server: server})
@@ -1083,6 +1075,33 @@ suite('services', function () {
       var server = svc.createServer()
         .onEcho(function (n, cb) { cb(null, n); });
       svc.createClient({server: server})
+        .echo(123, function (err, n) {
+          assert(!err, err);
+          assert.equal(n, 123);
+          done();
+        });
+    });
+
+    test('frame codec', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Echo',
+        messages: {
+          echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
+        }
+      });
+      var server = svc.createServer()
+        .onEcho(function (n, cb) { cb(null, n); });
+      var client = svc.createClient();
+      client.createChannel(function (cb) {
+        var transports = createPassthroughTransports();
+        server.createChannel(function (cb) {
+          cb(null, transports[0].writable);
+          return transports[0].readable;
+        }, {codec: 'frame'});
+        cb(null, transports[1].readable);
+        return transports[1].writable;
+      }, {codec: 'frame'});
+      client
         .echo(123, function (err, n) {
           assert(!err, err);
           assert.equal(n, 123);
@@ -1865,37 +1884,6 @@ suite('services', function () {
         });
       });
 
-      test('client timeout', function (done) {
-        var svc = Service.forProtocol({
-          protocol: 'Sleep',
-          messages: {
-            sleep: {request: [{name: 'ms', type: 'int'}], response: 'int'}
-          }
-        });
-        setupFn(svc, svc, {timeout: 50}, function (client, server) {
-          server
-            .onSleep(function (n, cb) {
-              // Delay response by the number requested.
-              setTimeout(function () { cb(null, n); }, n);
-            });
-          client.sleep(10, function (err, res) {
-            // Default timeout used here, but delay is short enough.
-            assert.strictEqual(err, null);
-            assert.equal(res, 10);
-            client.sleep(100, function (err) {
-              // Default timeout used here, but delay is _not_ short enough.
-              assert(/timeout/.test(err), err);
-              client.sleep(100, {timeout: 200}, function (err, res) {
-                // Custom timeout, high enough for the delay.
-                assert.strictEqual(err, null);
-                assert.equal(res, 100);
-                done();
-              });
-            });
-          });
-        });
-      });
-
       test('server error after handler', function (done) {
         var svc = Service.forProtocol({
           protocol: 'Math',
@@ -1952,14 +1940,13 @@ suite('services', function () {
           client.wait(50, interruptedCb);
           client.wait(10, function (err, res) {
             assert.equal(res, 'ok');
-            channel.destroy(true);
+            channel.destroy({noWait: true});
           });
 
           function interruptedCb(err) {
             assert(/interrupted/.test(err), err);
             interrupted++;
           }
-
         });
       });
 
@@ -2008,31 +1995,6 @@ suite('services', function () {
               });
             });
           });
-        });
-      });
-
-      test('destroy server channel during handshake', function (done) {
-        var svc = Service.forProtocol({
-          protocol: 'Sleep',
-          messages: {
-            sleep: {request: [{name: 'ms', type: 'int'}], response: 'int'}
-          }
-        });
-        setupFn(svc, svc, {timeout: 20}, function (client, server) {
-          // For stateful emitters, the channel already exists.
-          server.activeChannels().forEach(onChannel);
-          // For stateless emitters, the channel won't exist yet.
-          server.on('channel', onChannel);
-          client.sleep(10, function (err) {
-            assert(/interrupted|destroyed/.test(err), err);
-            done();
-          });
-
-          function onChannel(channel) {
-            channel.on('handshake', function () {
-              this.destroy(true);
-            });
-          }
         });
       });
     }
