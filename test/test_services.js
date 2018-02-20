@@ -5,7 +5,6 @@
 var types = require('../lib/types'),
     services = require('../lib/services'),
     assert = require('assert'),
-    sinon = require('sinon'),
     stream = require('stream'),
     util = require('util');
 
@@ -557,7 +556,7 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'boolean'}}
       });
       var transport = createPassthroughTransports(true)[0];
-      svc.createClient({timeout: 5}).createChannel(transport)
+      svc.createClient().createChannel(transport, {connectionTimeout: 10})
         .on('error', function (err) {
           assert(/timeout/.test(err), err);
           assert.strictEqual(this.client.service, svc);
@@ -1085,7 +1084,6 @@ suite('services', function () {
     });
 
     test('middleware deadline', function (done) {
-      var clock = sinon.useFakeTimers();
       var svc = Service.forProtocol({
         protocol: 'Echo',
         messages: {
@@ -1096,19 +1094,20 @@ suite('services', function () {
       var server = svc.createServer();
       svc.createClient({server: server})
         .use(function (wreq, wres, next) {
-          clock.tick(75);
-          next(null, function (err, prev) {
-            pending--;
-            prev(err);
-          });
+          setTimeout(function () {
+            next(null, function (err, prev) {
+              pending--;
+              prev(err);
+            });
+          }, 75);
         })
         .use(function (wreq, wres, next) {
-          setTimeout(next, 100);
+          assert(false); // Shouldn't be called.
+          next();
         })
-        .echo(123, {deadline: 50}, function (err) {
+        .echo(123, {timeout: 50}, function (err) {
           assert(/deadline exceeded/.test(err), err);
           assert(!pending);
-          clock.restore();
           done();
         });
     });
