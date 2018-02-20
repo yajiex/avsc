@@ -748,7 +748,7 @@ suite('services', function () {
         messages: {ping: {request: [], response: 'null'}}
       });
       // Fake handshake response.
-      var hres = services.HANDSHAKE_RESPONSE_TYPE.clone({
+      var hres = Service.HANDSHAKE_RESPONSE_TYPE.clone({
         match: 'NONE',
         serverService: JSON.stringify(svc.protocol),
         serverHash: svc.hash
@@ -1658,6 +1658,37 @@ suite('services', function () {
               done();
             }
           }
+        });
+      });
+
+      test('server tags', function (done) {
+        var svc = Service.forProtocol({
+          protocol: 'Math',
+          messages: {
+            neg: {request: [{name: 'n', type: 'int'}], response: 'int'}
+          }
+        });
+        setupFn(svc, svc, function (client, server) {
+          server
+            .use(function (wreq, wres, next) {
+              wres.tags.foo = 'abc';
+              next();
+            })
+            .onNeg(function (n, cb) { cb(null, -n); });
+          var t = types.Type.forSchema('string');
+          server.tagTypes.foo = client.tagTypes.foo = t;
+          client
+            .use(function (wreq, wres, next) {
+              next(null, function (err, prev) {
+                assert.equal(wres.tags.foo, 'abc');
+                prev(err);
+              });
+            })
+            .neg(2, function (err, res) {
+              assert.strictEqual(err, null);
+              assert.equal(res, -2);
+              done();
+            });
         });
       });
 
