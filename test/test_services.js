@@ -1219,7 +1219,7 @@ suite('services', function () {
       });
       var server = svc.createServer()
         .on('channel', function (channel) {
-          channel.on('incomingRequestPre', function (wreq, ctx) {
+          channel.on('incomingRequestPre', function (wreq, wres, ctx) {
             ctx.one = 1;
           });
         })
@@ -1368,7 +1368,7 @@ suite('services', function () {
         .call(function (server) {
           server
             .on('channel', function (channel) {
-              channel.on('incomingRequestPre', function (wreq, ctx) {
+              channel.on('incomingRequestPre', function (wreq, wres, ctx) {
                 ctx.foo = 'bar';
               });
             })
@@ -1384,7 +1384,7 @@ suite('services', function () {
       svc.createClient({server: server})
         .call(function (client) {
           client.activeChannels()[0]
-            .on('outgoingRequestPre', function (wreq, ctx) {
+            .on('outgoingRequestPre', function (wreq, wres, ctx) {
               ctx.two += 1;
             });
           client.use(function (wreq, wres, next) { next(); });
