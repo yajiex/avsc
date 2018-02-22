@@ -873,22 +873,6 @@ suite('services', function () {
       client.destroyChannels({noWait: true});
     });
 
-    test('default policy', function (done) {
-      var svc = Service.forProtocol({
-        protocol: 'Ping',
-        messages: {ping: {request: [], response: 'null', 'one-way': true}}
-      });
-      var transports = createPassthroughTransports(true);
-      var client = svc.createClient();
-      client.createChannel(transports[0], {noPing: true});
-      client.createChannel(transports[1], {noPing: true});
-      client.ping(function (err) {
-        assert(!err, err);
-        assert.strictEqual(this.channel.client, client);
-        done();
-      });
-    });
-
     test('custom policy', function (done) {
       var svc = Service.forProtocol({
         protocol: 'Ping',
@@ -1164,7 +1148,7 @@ suite('services', function () {
       var ctx = {id: 123};
       var client = svc.createClient({server: server});
       var channel = client.activeChannels()[0];
-      channel.on('outgoingRequestPre', function (ctx) {
+      channel.on('outgoingRequestPre', function (wreq, wres, ctx) {
         ctx.id = 123;
       });
       client.neg(1, ctx, function (err, n) {
@@ -1369,6 +1353,7 @@ suite('services', function () {
           server
             .on('channel', function (channel) {
               channel.on('incomingRequestPre', function (wreq, wres, ctx) {
+                debugger;
                 ctx.foo = 'bar';
               });
             })
@@ -1468,6 +1453,25 @@ suite('services', function () {
       svc.createClient({server: server}).push(1);
     });
 
+    test('stateful connected one-way message', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Ping',
+        messages: {
+          ping: {request: [], response: 'null', 'one-way': true}
+        }
+      });
+      var transports = createPassthroughTransports(true);
+      var client = svc.createClient();
+      client.createChannel(transports[0]);
+      var server = svc.createServer();
+      server.createChannel(transports[1]);
+      server.onPing(function (cb) {
+        assert.strictEqual(cb, undefined);
+        done();
+      });
+      client.ping();
+    });
+
     suite('stateful', function () {
 
       run(function (clientPtcl, serverPtcl, opts, cb) {
@@ -1546,21 +1550,6 @@ suite('services', function () {
         });
       });
 
-      test('one-way message', function (done) {
-        var svc = Service.forProtocol({
-          protocol: 'Ping',
-          messages: {
-            ping: {request: [], response: 'null', 'one-way': true}
-          }
-        });
-        setupFn(svc, svc, function (client, server) {
-          server.onPing(function (cb) {
-            assert.strictEqual(cb, undefined);
-            done();
-          });
-          client.ping();
-        });
-      });
 
       test('invalid strict error', function (done) {
         var svc = Service.forProtocol({
