@@ -1353,7 +1353,6 @@ suite('services', function () {
           server
             .on('channel', function (channel) {
               channel.on('incomingRequestPre', function (wreq, wres, ctx) {
-                debugger;
                 ctx.foo = 'bar';
               });
             })
