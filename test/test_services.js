@@ -226,7 +226,7 @@ suite('services', function () {
 
     test('createClient transport option', function (done) {
       var svc = Service.forProtocol({protocol: 'Empty'});
-      svc.createClient({transport: new stream.PassThrough()})
+      svc.createClient({transport: new stream.PassThrough({objectMode: true})})
         .on('channel', function () { done(); });
     });
 
@@ -935,6 +935,40 @@ suite('services', function () {
         function () { client.emitMessage('foo'); },
         /unknown message/
       );
+    });
+
+    test('custom policy', function (done) {
+      var svc = Service.forProtocol({
+        protocol: 'Ping',
+        messages: {ping: {request: [], response: 'boolean'}}
+      });
+      var transport = {
+        readable: new stream.PassThrough(),
+        writable: new stream.PassThrough()
+      };
+
+      var client = svc.createClient({channelPolicy: policy});
+      var channels = [
+        client.createChannel(transport, {noPing: true}),
+        client.createChannel(transport, {noPing: true})
+      ];
+      client.ping();
+
+      function policy(channels_) {
+        assert.deepEqual(channels_, channels);
+        done();
+      }
+    });
+
+    test('remote protocols existing', function () {
+      var ptcl1 = Service.forProtocol({protocol: 'Empty1'});
+      var ptcl2 = Service.forProtocol({protocol: 'Empty2'});
+      var remotePtcls = {abc: ptcl2.protocol};
+      var client = ptcl1.createClient({
+        remoteFingerprint: 'abc',
+        remoteProtocols: remotePtcls
+      });
+      assert.deepEqual(client.remoteProtocols(), remotePtcls);
     });
 
     test('invalid response', function (done) {

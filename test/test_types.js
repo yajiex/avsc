@@ -1456,6 +1456,21 @@ suite('types', function () {
       }
     });
 
+    test('round-trip multi-block array', function () {
+      var tap = new Tap(new Buffer(64));
+      tap.writeInt(2);
+      tap.writeString('hi');
+      tap.writeString('hey');
+      tap.writeInt(1);
+      tap.writeString('hello');
+      tap.writeInt(0);
+      var t = new builtins.ArrayType({items: 'string'});
+      assert.deepEqual(
+        t.fromBuffer(tap.buf.slice(0, tap.pos)),
+        ['hi', 'hey', 'hello']
+      );
+    });
+
   });
 
   suite('RecordType', function () {
@@ -2766,6 +2781,34 @@ suite('types', function () {
       assert.deepEqual(t.schema({exportAttrs: true}), schema);
     });
 
+    test('recursive dereferencing name', function () {
+      function BoxType(schema, opts) {
+        LogicalType.call(this, schema, opts);
+      }
+      util.inherits(BoxType, LogicalType);
+
+      BoxType.prototype._fromValue = function (val) { return val.unboxed; };
+
+      BoxType.prototype._toValue = function (any) { return {unboxed: any}; };
+
+      var t = Type.forSchema({
+          name: 'BoxedMap',
+          type: 'record',
+          logicalType: 'box',
+          fields: [
+            {
+              name: 'unboxed',
+              type: {type: 'map', values: ['string', 'BoxedMap']}
+            }
+          ]
+      }, {logicalTypes: {box: BoxType}});
+
+      var v = {foo: 'hi', bar: {baz: {}}};
+      assert(t.isValid({}));
+      assert(t.isValid(v));
+      assert.deepEqual(t.fromBuffer(t.toBuffer(v)), v);
+    });
+
     test('resolve underlying > logical', function () {
       var t1 = Type.forSchema({type: 'string'});
       var t2 = Type.forSchema({
@@ -2793,6 +2836,31 @@ suite('types', function () {
       var res = t2.createResolver(t1);
       assert.throws(function () { Type.forSchema('int').createResolver(t1); });
       assert.equal(t2.fromBuffer(buf, res), +d);
+    });
+
+    test('resolve logical type into a schema without the field', function () {
+      var t1 = Type.forSchema({
+        name: 'Person',
+        type: 'record',
+        fields: [
+          {name: 'age', type: {type: 'int', logicalType: 'age'}},
+          {name: 'time', type: {type: 'long', logicalType: 'date'}}
+        ]
+      }, {logicalTypes: logicalTypes});
+      var t2 = Type.forSchema({
+        name: 'Person',
+        type: 'record',
+        fields: [
+          {name: 'age', type: {type: 'int', logicalType: 'age'}}
+        ]
+      }, {logicalTypes: logicalTypes});
+
+      var buf = t1.toBuffer({age: 12, time: new Date()});
+
+      var res = t2.createResolver(t1);
+      var decoded = t2.fromBuffer(buf, res);
+      assert.equal(decoded.age, 12);
+      assert.equal(decoded.time, undefined);
     });
 
     test('resolve union of logical > union of logical', function () {
