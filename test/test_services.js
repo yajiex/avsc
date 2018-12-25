@@ -4,6 +4,7 @@
 
 var types = require('../lib/types'),
     services = require('../lib/services'),
+    utils = require('../lib/utils'),
     assert = require('assert'),
     stream = require('stream'),
     util = require('util');
@@ -226,7 +227,7 @@ suite('services', function () {
 
     test('createClient transport option', function (done) {
       var svc = Service.forProtocol({protocol: 'Empty'});
-      svc.createClient({transport: new stream.PassThrough({objectMode: true})})
+      svc.createClient({transport: createPassthroughTransports(true)[0]})
         .on('channel', function () { done(); });
     });
 
@@ -384,19 +385,13 @@ suite('services', function () {
     var FrameEncoder = services.streams.FrameEncoder;
 
     test('roundtrip', function (done) {
-      var pktType = types.Type.forSchema({
-        type: 'record',
-        name: 'Packet',
-        fields: [
-          {name: 'headers', type: {type: 'map', values: 'bytes'}},
-          {name: 'body', type: 'bytes'}
-        ]
-      });
       var n = 200;
       var src = [];
       while (n--) {
-        var val = pktType.random();
-        src.push(new Packet(0, val.headers, val.body));
+        const pkt = Packet.type.random();
+        pkt.id = 0;
+        pkt.handshake = null;
+        src.push(pkt);
       }
       var dst = [];
       var encoder = new FrameEncoder();
@@ -418,20 +413,12 @@ suite('services', function () {
     var NettyEncoder = services.streams.NettyEncoder;
 
     test('roundtrip', function (done) {
-      var pktType = types.Type.forSchema({
-        type: 'record',
-        name: 'Packet',
-        fields: [
-          {name: 'id', type: 'int'},
-          {name: 'headers', type: {type: 'map', values: 'bytes'}},
-          {name: 'body', type: 'bytes'}
-        ]
-      });
       var n = 200;
       var src = [];
       while (n--) {
-        var val = pktType.random();
-        src.push(new Packet(val.id, val.headers, val.body));
+        const pkt = Packet.type.random();
+        pkt.handshake = null;
+        src.push(pkt);
       }
       var dst = [];
       var encoder = new NettyEncoder();
@@ -460,11 +447,11 @@ suite('services', function () {
       });
       var a = new Adapter(s, s);
       assert.throws(function () {
-        a._decodeRequest({body: new Buffer([24])}, {});
+        a._decodeRequest({body: utils.bufferFrom([24])}, {});
       }, /truncated/);
       assert.throws(function () {
         a._decodeResponse(
-          {body: new Buffer([48]), headers: {}},
+          {body: utils.bufferFrom([48]), headers: {}},
           {tags: {}},
           s.message('echo'),
           {}
@@ -668,7 +655,7 @@ suite('services', function () {
           assert(/trailing/.test(err), err);
           done();
         });
-      transports[0].readable.end(new Buffer([48]));
+      transports[0].readable.end(utils.bufferFrom([48]));
     });
   });
 
@@ -722,7 +709,7 @@ suite('services', function () {
         assert(/trailing data/.test(err), err);
         done();
       });
-      readable.end(new Buffer([48]));
+      readable.end(utils.bufferFrom([48]));
     });
 
     test('frame encoder error', function (done) {
@@ -798,7 +785,7 @@ suite('services', function () {
           assert(/trailing/.test(err), err);
           done();
         });
-      transport.end(new Buffer([48]));
+      transport.end(utils.bufferFrom([48]));
     });
 
     test('writable finished', function (done) {
@@ -830,7 +817,7 @@ suite('services', function () {
         assert(/trailing/.test(err), err);
         done();
       });
-      transports[1].readable.end(new Buffer([48]));
+      transports[1].readable.end(utils.bufferFrom([48]));
     });
   });
 
@@ -986,7 +973,7 @@ suite('services', function () {
       setTimeout(function () {
         // "Send" an invalid payload (negative union offset). We wait to allow
         // the callback for the above message to be registered.
-        transports[0].readable.write({id: 1, body: new Buffer([45])});
+        transports[0].readable.write({id: 1, body: utils.bufferFrom([45])});
       }, 0);
     });
   });
@@ -1075,9 +1062,11 @@ suite('services', function () {
           cb(null, 1); // Still call the callback to make sure it is ignored.
         });
       svc.createClient({server: server})
-         .ping({timeout: 10}, function (err) {
-            assert(/timeout/.test(err), err);
-            done();
+        .once('channel', function () {
+          this.ping({timeout: 10}, function (err) {
+              assert(/timeout/.test(err), err);
+              done();
+            });
           });
     });
   });
@@ -1094,10 +1083,12 @@ suite('services', function () {
       var server = svc.createServer()
         .onEcho(function (n, cb) { cb(null, n); });
       svc.createClient({server: server})
-        .echo(123, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, 123);
-          done();
+        .once('channel', function () {
+          this.echo(123, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, 123);
+            done();
+          });
         });
     });
 
@@ -1123,10 +1114,12 @@ suite('services', function () {
           assert(false); // Shouldn't be called.
           next();
         })
-        .echo(123, {timeout: 50}, function (err) {
-          assert(/deadline exceeded/.test(err), err);
-          assert(!pending);
-          done();
+        .once('channel', function () {
+          this.echo(123, {timeout: 50}, function (err) {
+            assert(/deadline exceeded/.test(err), err);
+            assert(!pending);
+            done();
+          });
         });
     });
 
@@ -1164,10 +1157,14 @@ suite('services', function () {
           echo: {request: [{name: 'n', type: 'int'}], response: 'int'}
         }
       });
-      var server = svc.createServer();
-      var client = svc.createClient({server: server});
-      client.activeChannels()[0].on('eot', function () { done(); });
-      server.destroyChannels({noWait: true});
+      var server = svc.createServer()
+        .once('channel', function (chan) {
+          server.destroyChannels({noWait: true});
+        });
+      svc.createClient({server: server})
+        .once('channel', function (chan) {
+          chan.on('eot', function () { done(); });
+        });
     });
 
     test('client context call options', function (done) {
@@ -1180,17 +1177,18 @@ suite('services', function () {
       var server = svc.createServer()
         .onNeg(function (n, cb) { cb(null, -n); });
       var ctx = {id: 123};
-      var client = svc.createClient({server: server});
-      var channel = client.activeChannels()[0];
-      channel.on('outgoingRequestPre', function (wreq, wres, ctx) {
-        ctx.id = 123;
-      });
-      client.neg(1, ctx, function (err, n) {
-        assert(!err, err);
-        assert.equal(n, -1);
-        assert.equal(this.id, 123);
-        done();
-      });
+      svc.createClient({server: server})
+        .once('channel', function (chan) {
+          chan.on('outgoingRequestPre', function (wreq, wres, ctx) {
+            ctx.id = 123;
+          });
+          this.neg(1, ctx, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, -1);
+            assert.equal(this.id, 123);
+            done();
+          });
+        });
     });
 
     test('server call constant context', function (done) {
@@ -1220,11 +1218,13 @@ suite('services', function () {
           cb(null, -n);
         });
       svc.createClient({server: server})
-        .neg(1, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -1);
-          assert.equal(numCalls, 3);
-          done();
+        .once('channel', function () {
+          this.neg(1, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, -1);
+            assert.equal(numCalls, 3);
+            done();
+          });
         });
     });
 
@@ -1250,10 +1250,12 @@ suite('services', function () {
           cb(null, -n);
         });
       svc.createClient({server: server})
-        .neg(1, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -1);
-          done();
+        .once('channel', function () {
+          this.neg(1, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, -1);
+            done();
+          });
         });
     });
 
@@ -1269,13 +1271,15 @@ suite('services', function () {
         .onNeg(function (n, cb) { cb(null, -n); });
 
       svc.createClient({server: server})
-        .neg(1, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -1);
-          this.channel.client.abs(5, function (err, n) {
+        .once('channel', function () {
+          this.neg(1, function (err, n) {
             assert(!err, err);
-            assert.equal(n, 10);
-            done();
+            assert.equal(n, -1);
+            this.channel.client.abs(5, function (err, n) {
+              assert(!err, err);
+              assert.equal(n, 10);
+              done();
+            });
           });
         });
 
@@ -1305,11 +1309,13 @@ suite('services', function () {
           isCalled = true;
           next();
         })
-        .neg(1, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -3);
-          assert(!isCalled);
-          done();
+        .once('channel', function () {
+          this.neg(1, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, -3);
+            assert(!isCalled);
+            done();
+          });
         });
     });
 
@@ -1336,9 +1342,11 @@ suite('services', function () {
             prev(new Error('bar'));
           });
         })
-        .neg(2, function (err) {
-          assert.strictEqual(err, null);
-          done();
+        .once('channel', function () {
+          this.neg(2, function (err) {
+            assert.strictEqual(err, null);
+            done();
+          });
         });
     });
 
@@ -1365,13 +1373,15 @@ suite('services', function () {
           cb(null, -n);
         });
       svc.createClient({server: server})
-        .neg(1, function (err) {
-          assert(/foobar/.test(err), err);
-          assert(!handlerCalled);
-          setTimeout(function () {
-            assert(errorTriggered);
-            done();
-          }, 0);
+        .once('channel', function () {
+          this.neg(1, function (err) {
+            assert(/foobar/.test(err), err);
+            assert(!handlerCalled);
+            setTimeout(function () {
+              assert(errorTriggered);
+              done();
+            }, 0);
+          });
         });
     });
 
@@ -1401,17 +1411,19 @@ suite('services', function () {
         });
       svc.createClient({server: server})
         .call(function (client) {
-          client.activeChannels()[0]
-            .on('outgoingRequestPre', function (wreq, wres, ctx) {
+          client.once('channel', function (chan) {
+            chan.on('outgoingRequestPre', function (wreq, wres, ctx) {
               ctx.two += 1;
             });
-          client.use(function (wreq, wres, next) { next(); });
-        })
-        .neg(1, {two: 2}, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -3);
-          assert.equal(this.two, 3);
-          done();
+            client
+              .use(function (wreq, wres, next) { next(); })
+              .neg(1, {two: 2}, function (err, n) {
+                assert(!err, err);
+                assert.equal(n, -3);
+                assert.equal(this.two, 3);
+                done();
+              });
+          })
         });
     });
 
@@ -1428,12 +1440,15 @@ suite('services', function () {
       }, {wrapUnions: true});
       var server = svc.createServer({silent: true})
         .onNeg(function (n, cb) { cb(n ? {int: n} : new Error('foo')); });
-      var client = svc.createClient({server: server});
-      client.neg(1, function (err) {
-          assert.deepEqual(err, {int: 1});
-          client.neg(0, function (err) {
-            assert(/foo/.test(err), err);
-            done();
+      svc.createClient({server: server})
+        .once('channel', function () {
+          var client = this;
+          client.neg(1, function (err) {
+            assert.deepEqual(err, {int: 1});
+            client.neg(0, function (err) {
+              assert(/foo/.test(err), err);
+              done();
+            });
           });
         });
     });
@@ -1454,13 +1469,15 @@ suite('services', function () {
           cb(null, -n);
         });
       svc.createClient({server: server})
-        .neg(1, function (err, n) {
-          assert(!err, err);
-          assert.equal(n, -1);
-          setTimeout(function () {
-            assert(!errorTriggered);
-            done();
-          }, 0);
+        .once('channel', function () {
+          this.neg(1, function (err, n) {
+            assert(!err, err);
+            assert.equal(n, -1);
+            setTimeout(function () {
+              assert(!errorTriggered);
+              done();
+            }, 0);
+          });
         });
     });
 
@@ -1483,7 +1500,8 @@ suite('services', function () {
         .use(function (wreq, wres, next) {
           next(new Error('foobar'));
         });
-      svc.createClient({server: server}).push(1);
+      svc.createClient({server: server})
+        .once('channel', function () { this.push(1); });
     });
 
     test('stateful connected one-way message', function (done) {
@@ -1723,7 +1741,7 @@ suite('services', function () {
         });
         setupFn(svc, svc, function (client, server) {
           server.onNeg(function (n, cb) { cb(null, -n); });
-          var buf = new Buffer([0, 1]);
+          var buf = utils.bufferFrom([0, 1]);
           var isDone = false;
           var channel = client.activeChannels()[0];
           client.tagTypes.buf = types.Type.forSchema('bytes');
@@ -1827,7 +1845,7 @@ suite('services', function () {
         });
         setupFn(svc, svc, function (client, server) {
           var isDone = false;
-          var buf = new Buffer([0, 1]);
+          var buf = utils.bufferFrom([0, 1]);
           // The server's channel won't be ready right away in the case of
           // stateless transports.
           var t = types.Type.forSchema('bytes');

@@ -97,7 +97,7 @@ interface EncoderOptions {
 
 interface ForSchemaOptions {
   assertLogicalTypes: boolean;
-  logicalTypes: { [type: string]: types.LogicalType };
+  logicalTypes: { [type: string]: new (schema: Schema, opts?: any) => types.LogicalType; };
   namespace: string;
   noAnonymousTypes: boolean;
   registry: { [name: string]: Type };
@@ -202,7 +202,7 @@ export class Service {
   readonly types: Type[];
 
   static compatible(client: Service.Client, server: Service.Server): boolean;
-  static forProtocol(protocol: any, options: any): Service;
+  static forProtocol(protocol: any, options?: any): Service;
   static isService(obj: any): boolean;
 }
 
@@ -231,6 +231,7 @@ export namespace Service {
     strictTypes: boolean;
     timeout: number;
     remoteProtocols: boolean;
+    transport?: Transport;
   }
 
   interface ServerOptions {
