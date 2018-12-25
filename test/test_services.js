@@ -388,7 +388,7 @@ suite('services', function () {
       var n = 200;
       var src = [];
       while (n--) {
-        const pkt = Packet.type.random();
+        var pkt = Packet.type.random();
         pkt.id = 0;
         pkt.handshake = null;
         src.push(pkt);
@@ -416,7 +416,7 @@ suite('services', function () {
       var n = 200;
       var src = [];
       while (n--) {
-        const pkt = Packet.type.random();
+        var pkt = Packet.type.random();
         pkt.handshake = null;
         src.push(pkt);
       }
