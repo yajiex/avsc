@@ -166,14 +166,6 @@ suite('services', function () {
       assert(!Service.isService({protocol: 'bar'}));
     });
 
-    test('inspect', function () {
-      var svc = Service.forProtocol({
-        namespace: 'hello',
-        protocol: 'World',
-      });
-      assert.equal(svc.inspect(), '<Service "hello.World">');
-    });
-
     test('using constructor', function () {
       var svc = new services.Service({protocol: 'Empty'});
       assert.equal(svc.name, 'Empty');

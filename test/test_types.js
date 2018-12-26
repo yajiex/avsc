@@ -498,7 +498,6 @@ suite('types', function () {
     test('to JSON', function () {
       var type = new builtins.UnwrappedUnionType(['null', 'int']);
       assert.equal(JSON.stringify(type), '["null","int"]');
-      assert.equal(type.inspect(), '<UnwrappedUnionType ["null","int"]>');
     });
 
     test('resolve int to [string, long]', function () {
@@ -2691,7 +2690,6 @@ suite('types', function () {
         logicalType: 'date'
       }, {logicalTypes: logicalTypes});
       assert(t instanceof DateType);
-      assert(/<(Date|Logical)Type {.+}>/.test(t.inspect())); // IE.
       assert(t.underlyingType instanceof builtins.LongType);
       assert(t.isValid(t.random()));
       var d = new Date(123);
@@ -2747,10 +2745,6 @@ suite('types', function () {
       var ageType = fields[0].type;
       ageType.constructor = undefined; // Mimic missing constructor name.
       assert(ageType instanceof AgeType);
-      assert.equal(
-        ageType.inspect(),
-        '<LogicalType {"type":"int","logicalType":"age"}>'
-      );
       assert(fields[1].type instanceof DateType);
       var date = new Date(Date.now());
       var buf = base.toBuffer({age: 12, time: +date});
@@ -3681,29 +3675,6 @@ suite('types', function () {
       var t = Type.forSchema('string');
       var buf = utils.newBuffer(2);
       assert.throws(function () { t.encode('hi', buf, -1); });
-    });
-
-  });
-
-  suite('inspect', function () {
-
-    test('type', function () {
-      assert.equal(Type.forSchema('int').inspect(), '<IntType>');
-      assert.equal(
-        Type.forSchema({type: 'map', values: 'string'}).inspect(),
-        '<MapType {"values":"string"}>'
-      );
-      assert.equal(
-        Type.forSchema({type: 'fixed', name: 'Id', size: 2}).inspect(),
-        '<FixedType "Id">'
-      );
-    });
-
-    test('resolver', function () {
-      var t1 = Type.forSchema('int');
-      var t2 = Type.forSchema('double');
-      var resolver = t2.createResolver(t1);
-      assert.equal(resolver.inspect(), '<Resolver>');
     });
 
   });

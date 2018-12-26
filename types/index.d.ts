@@ -166,7 +166,6 @@ export class Type {
   fingerprint(algorithm?: string): Buffer;
   fromBuffer(buffer: Buffer, resolver?: Resolver, noCheck?: boolean): any;
   fromString(str: string): any;
-  inspect(): string;
   isValid(val: any, opts?: Partial<IsValidOptions>): boolean;
   random(): Type;
   schema(opts?: Partial<SchemaOptions>): Schema;
@@ -190,7 +189,6 @@ export class Service {
   createClient(options?: Partial<Service.ClientOptions>): Service.Client;
   createServer(options?: Partial<Service.ServerOptions>): Service.Server;
   equals(args: any): boolean;  // deprecated
-  inspect(): string;
   message(name: string): any;
   type(name: string): Type | undefined;
 
